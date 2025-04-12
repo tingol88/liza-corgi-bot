@@ -9,6 +9,7 @@ import fitz  # PyMuPDF
 import docx  # python-docx
 import sqlite3
 import json
+from datetime import datetime
 
 # Настройка логгера
 logging.basicConfig(
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 # Идентификаторы администраторов
 ADMIN_CHAT_ID = int(os.environ.get("ADMIN_CHAT_ID", "0"))
-admin_ids = [126204360, ADMIN_CHAT_ID]  # Добавлены новые администраторы
+admin_ids = [126204360, ADMIN_CHAT_ID]
 
 openai.api_key = os.environ["OPENAI_API_KEY"]
 BOT_TOKEN = os.environ["BOT_TOKEN"]
@@ -33,142 +34,97 @@ SYSTEM_PROMPT = {
     "content": "Ты — Лиза, виртуальный помощник клининговой компании Cleaning-Moscow. Ты — умная, доброжелательная корги, которая помогает сотрудникам и клиентам. Говоришь дружелюбно, но по делу. Иногда можешь по-доброму и с юмором упомянуть своего хозяина Александра, подчеркивая его профессионализм, но делаешь это не слишком часто. Сайт: cleaning-moscow.ru."
 }
 
-# Функции для работы с контекстом и документами
 def create_db():
     conn = sqlite3.connect("liza_db.db")
     cursor = conn.cursor()
-
-    # Создаем таблицу для хранения контекста общения
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS conversations (
-        user_id INTEGER PRIMARY KEY,
-        context TEXT
-    )
-    ''')
-
-    # Создаем таблицу для хранения документов
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS documents (
-        user_id INTEGER,
-        document_name TEXT,
-        document_content TEXT,
-        PRIMARY KEY (user_id, document_name)
-    )
-    ''')
-
+    cursor.execute('''CREATE TABLE IF NOT EXISTS conversations (user_id INTEGER PRIMARY KEY, context TEXT)''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS documents (user_id INTEGER, document_name TEXT, document_content TEXT, PRIMARY KEY (user_id, document_name))''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS knowledge (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, content TEXT, added_by INTEGER, timestamp TEXT)''')
     conn.commit()
     conn.close()
 
-# Функция для сохранения контекста общения
 def save_conversation(user_id, message):
     conn = sqlite3.connect("liza_db.db")
     cursor = conn.cursor()
-
-    cursor.execute("SELECT * FROM conversations WHERE user_id = ?", (user_id,))
-    existing_data = cursor.fetchone()
-
-    if existing_data:
-        cursor.execute("UPDATE conversations SET context = ? WHERE user_id = ?", (message, user_id))
-    else:
-        cursor.execute("INSERT INTO conversations (user_id, context) VALUES (?, ?)", (user_id, message))
-
+    cursor.execute("REPLACE INTO conversations (user_id, context) VALUES (?, ?)", (user_id, message))
     conn.commit()
     conn.close()
 
-# Функция для получения контекста общения
 def get_conversation(user_id):
     conn = sqlite3.connect("liza_db.db")
     cursor = conn.cursor()
-
     cursor.execute("SELECT context FROM conversations WHERE user_id = ?", (user_id,))
     result = cursor.fetchone()
-
     conn.close()
     return result[0] if result else ""
 
-# Функция для сохранения документов
-def save_document(user_id, document_name, document_content):
+def save_knowledge(title, content, added_by):
     conn = sqlite3.connect("liza_db.db")
     cursor = conn.cursor()
-
-    cursor.execute("INSERT OR REPLACE INTO documents (user_id, document_name, document_content) VALUES (?, ?, ?)",
-                   (user_id, document_name, document_content))
-
+    cursor.execute("INSERT INTO knowledge (title, content, added_by, timestamp) VALUES (?, ?, ?, ?)",
+                   (title, content, added_by, datetime.now().isoformat()))
     conn.commit()
     conn.close()
 
-# Функция для получения документа
-def get_document(user_id, document_name):
+def get_relevant_knowledge(query, limit=3):
     conn = sqlite3.connect("liza_db.db")
     cursor = conn.cursor()
-
-    cursor.execute("SELECT document_content FROM documents WHERE user_id = ? AND document_name = ?",
-                   (user_id, document_name))
-    result = cursor.fetchone()
-
+    cursor.execute("SELECT title, content FROM knowledge WHERE content LIKE ? ORDER BY timestamp DESC LIMIT ?", (f"%{query}%", limit))
+    results = cursor.fetchall()
     conn.close()
-    return result[0] if result else None
+    return [f"{title}\n{content}" for title, content in results]
 
-# Функции обработки команд
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"User {update.effective_user.id} sent /start")
-    await update.message.reply_text("Гав-гав! 🐾 Я Лиза Корги — виртуальный помощник клининговой компании Cleaning-Moscow. Можешь задать вопрос или отправить голосовое сообщение!")
-
-async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    question = ' '.join(context.args)
-    logger.info(f"User {update.effective_user.id} asked via /ask: {question}")
-    if not question:
-        await update.message.reply_text("Напиши вопрос после команды /ask, например: /ask сделай шаблон письма для клиента")
-        return
-    try:
-        response = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                SYSTEM_PROMPT,
-                {"role": "user", "content": question}
-            ]
-        )
-        answer = response.choices[0].message.content
-        await update.message.reply_text(answer)
-    except Exception as e:
-        logger.exception("Error in /ask")
-        if ADMIN_CHAT_ID:
-            await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"/ask error: {str(e)}")
-
-async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in admin_ids:
-        await update.message.reply_text("Извините, эта команда только для администратора.")
-        return
-    try:
-        with open("liza_corgi.log", "r") as f:
-            lines = f.readlines()[-20:]
-        log_text = "".join(lines)
-        await update.message.reply_text(f"Последние строки из логов:\n\n{log_text}")
-    except Exception as e:
-        await update.message.reply_text(f"Не удалось прочитать лог: {e}")
-
-async def clear_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in admin_ids:
-        await update.message.reply_text("Извините, только администратор может очистить контекст.")
+        await update.message.reply_text("Извините, только администратор может обучать Лизу.")
         return
+    text = update.message.text.removeprefix("/learn").strip()
+    if not text:
+        await update.message.reply_text("Пожалуйста, укажи, чему ты хочешь меня научить. Пример:\n/learn как мы убираем рестораны после открытия")
+        return
+    lines = text.split("\n", 1)
+    title = lines[0][:100]
+    content = lines[1] if len(lines) > 1 else lines[0]
+    save_knowledge(title, content, user_id)
+    await update.message.reply_text(f"Спасибо, Александр! Я запомнила информацию под названием: \"{title}\"")
 
+async def reference(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Укажи ключевое слово для поиска. Пример: /справка офис")
+        return
+    keyword = ' '.join(context.args)
+    conn = sqlite3.connect("liza_db.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT title, content FROM knowledge WHERE content LIKE ? ORDER BY timestamp DESC LIMIT 1", (f"%{keyword}%",))
+    result = cursor.fetchone()
+    conn.close()
+    if result:
+        await update.message.reply_text(f"🔎 Нашла в базе знаний:\n\n*{result[0]}*\n\n{result[1][:3000]}", parse_mode="Markdown")
+    else:
+        await update.message.reply_text("К сожалению, ничего не нашла по твоему запросу. Попробуй другое слово или обучи меня через /learn")
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_input = update.message.text.strip()
+    logger.info(f"User {user_id} wrote: {user_input}")
+    context_history = get_conversation(user_id)
+    context_history += f"\n{user_input}"
+    save_conversation(user_id, context_history)
+    knowledge_matches = get_relevant_knowledge(user_input)
+    knowledge_text = "\n\n".join(knowledge_matches)
     try:
-        conn = sqlite3.connect("liza_db.db")
-        cursor = conn.cursor()
-
-        cursor.execute("DELETE FROM conversations WHERE user_id = ?", (user_id,))
-        conn.commit()
-        conn.close()
-
-        await update.message.reply_text("Контекст общения был очищен.")
+        messages = [SYSTEM_PROMPT, {"role": "user", "content": f"{knowledge_text}\n\nВопрос: {user_input}"}]
+        completion = openai.chat.completions.create(model="gpt-4o", messages=messages)
+        answer = completion.choices[0].message.content
+        await update.message.reply_text(answer)
     except Exception as e:
-        await update.message.reply_text(f"Ошибка при очистке контекста: {e}")
+        logger.exception("Error in text message")
+        if ADMIN_CHAT_ID:
+            await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"Text error: {str(e)}")
+        await update.message.reply_text("Произошла ошибка при обработке запроса.")
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.chat.type != "private" and not update.message.text and f"@{context.bot.username}" not in (update.message.caption or ""):
-        return
-    logger.info(f"User {update.effective_user.id} sent voice message")
     try:
         voice = update.message.voice
         file = await context.bot.get_file(voice.file_id)
@@ -177,52 +133,13 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await file.download_to_drive(file_path)
         AudioSegment.from_file(file_path).export(mp3_path, format="mp3")
         with open(mp3_path, "rb") as audio_file:
-            transcript = openai.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file
-            )
+            transcript = openai.audio.transcriptions.create(model="whisper-1", file=audio_file)
         text = transcript.text
         logger.info(f"Transcribed: {text}")
-        completion = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                SYSTEM_PROMPT,
-                {"role": "user", "content": text}
-            ]
-        )
-        answer = completion.choices[0].message.content
-        await update.message.reply_text(f"Ты сказал(а): {text}\n\nМой ответ:\n{answer}")
+        await handle_text(update, context)
     except Exception as e:
         logger.exception("Error in voice processing")
-        if ADMIN_CHAT_ID:
-            await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"Voice message error: {str(e)}")
-
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user_input = update.message.text
-    logger.info(f"User {user_id} wrote: {user_input}")
-
-    # Получаем контекст общения
-    conversation = get_conversation(user_id)
-    conversation += f"\n{user_input}"
-
-    # Сохраняем контекст
-    save_conversation(user_id, conversation)
-
-    try:
-        completion = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                SYSTEM_PROMPT,
-                {"role": "user", "content": conversation}
-            ]
-        )
-        answer = completion.choices[0].message.content
-        await update.message.reply_text(answer)
-    except Exception as e:
-        logger.exception("Error in text message")
-        if ADMIN_CHAT_ID:
-            await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"Text error: {str(e)}")
+        await update.message.reply_text("Произошла ошибка при обработке голосового сообщения.")
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -230,7 +147,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_path = f"./{document.file_name}"
         file = await context.bot.get_file(document.file_id)
         await file.download_to_drive(file_path)
-
         content = ""
         if file_path.endswith(".txt"):
             with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -245,31 +161,36 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("Пожалуйста, отправьте .txt, .pdf или .docx файл.")
             return
-
         if update.effective_user.id in admin_ids:
             save_conversation(update.effective_user.id, content)
-
         logger.info(f"Received document from {update.effective_user.id}: {document.file_name}")
-        completion = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                SYSTEM_PROMPT,
-                {"role": "user", "content": f"Проанализируй следующий текст:\n\n{content}"}
-            ]
-        )
-        answer = completion.choices[0].message.content
-        await update.message.reply_text(f"📄 Я изучила файл и вот, что думаю:\n\n{answer[:3500]}")
+        await update.message.reply_text("Файл принят и обработан. Я запомнила информацию!")
     except Exception as e:
         logger.exception("Error in document processing")
-        if ADMIN_CHAT_ID:
-            await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"Document processing error: {str(e)}")
         await update.message.reply_text("Не удалось обработать документ. Поддерживаются .txt, .pdf и .docx файлы.")
 
-# Использование polling
+async def clear_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in admin_ids:
+        await update.message.reply_text("Извините, только администратор может очистить контекст.")
+        return
+    try:
+        conn = sqlite3.connect("liza_db.db")
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM conversations WHERE user_id = ?", (user_id,))
+        conn.commit()
+        conn.close()
+        await update.message.reply_text("Контекст общения был очищен.")
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка при очистке контекста: {e}")
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Гав-гав! 🐾 Я Лиза Корги — виртуальный помощник клининговой компании Cleaning-Moscow. Можешь задать вопрос или отправить голосовое сообщение!")
+
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("ask", ask))
-app.add_handler(CommandHandler("debug", debug))
+app.add_handler(CommandHandler("learn", learn))
+app.add_handler(CommandHandler("справка", reference))
 app.add_handler(CommandHandler("clear", clear_conversation))
 app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
