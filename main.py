@@ -208,6 +208,42 @@ app.add_handler(CommandHandler("help", help_command))
 app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
 app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
+app.add_handler(CommandHandler("doc", google_doc))
+app.add_handler(CommandHandler("sheet", google_sheet))
 
 create_db()
+from google_connect import get_google_docs_text, get_google_sheet_values
+
+async def google_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in admin_ids:
+        await update.message.reply_text("Извините, только администратор может загружать документы.")
+        return
+    if not context.args:
+        await update.message.reply_text("Укажи ID Google Документа. Пример: /doc 1A2B3C4D5E6F...")
+        return
+    try:
+        doc_id = context.args[0]
+        content = get_google_docs_text(doc_id)
+        save_conversation(update.effective_user.id, content)
+        await update.message.reply_text("📄 Документ прочитан и добавлен в базу знаний.")
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка при загрузке документа: {e}")
+
+async def google_sheet(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in admin_ids:
+        await update.message.reply_text("Извините, только администратор может загружать таблицы.")
+        return
+    if len(context.args) < 2:
+        await update.message.reply_text("Формат: /sheet <SPREADSHEET_ID> <RANGE>. Пример: /sheet 1A2B3C Range1!A1:E10")
+        return
+    try:
+        sheet_id = context.args[0]
+        sheet_range = " ".join(context.args[1:])
+        rows = get_google_sheet_values(sheet_id, sheet_range)
+        content = "\n".join([", ".join(row) for row in rows])
+        save_conversation(update.effective_user.id, content)
+        await update.message.reply_text("📊 Таблица обработана и сохранена!")
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка при загрузке таблицы: {e}")
+
 app.run_polling()
