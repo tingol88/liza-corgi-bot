@@ -91,7 +91,7 @@ async def learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def reference(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("Укажи ключевое слово для поиска. Пример: /справка офис")
+        await update.message.reply_text("Укажи ключевое слово для поиска. Пример: /ref офис")
         return
     keyword = ' '.join(context.args)
     conn = sqlite3.connect("liza_db.db")
@@ -190,7 +190,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("learn", learn))
-app.add_handler(CommandHandler("справка", reference))
+app.add_handler(CommandHandler("ref", reference))
 app.add_handler(CommandHandler("clear", clear_conversation))
 app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
