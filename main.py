@@ -62,9 +62,7 @@ async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with open("liza_corgi.log", "r") as f:
             lines = f.readlines()[-20:]
         log_text = "".join(lines)
-        await update.message.reply_text(f"Последние строки из логов:
-
-{log_text}")
+        await update.message.reply_text(f"Последние строки из логов:\n\n{log_text}")
     except Exception as e:
         await update.message.reply_text(f"Не удалось прочитать лог: {e}")
 
@@ -94,10 +92,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
         )
         answer = completion.choices[0].message.content
-        await update.message.reply_text(f"Ты сказал(а): {text}
-
-Мой ответ:
-{answer}")
+        await update.message.reply_text(f"Ты сказал(а): {text}\n\nМой ответ:\n{answer}")
     except Exception as e:
         logger.exception("Error in voice processing")
         if ADMIN_CHAT_ID:
