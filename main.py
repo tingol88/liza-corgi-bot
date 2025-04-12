@@ -29,6 +29,7 @@ SYSTEM_PROMPT = {
     "content": "Ты — Лиза, виртуальный помощник клининговой компании Cleaning-Moscow. Ты — умная, доброжелательная корги, которая помогает сотрудникам и клиентам. Говоришь дружелюбно, но по делу. Иногда можешь по-доброму и с юмором упомянуть своего хозяина Александра, подчеркивая его профессионализм, но делаешь это не слишком часто. Сайт: cleaning-moscow.ru."
 }
 
+# Функции обработки команд
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"User {update.effective_user.id} sent /start")
     await update.message.reply_text("Гав-гав! 🐾 Я Лиза Корги — виртуальный помощник клининговой компании Cleaning-Moscow. Можешь задать вопрос или отправить голосовое сообщение!")
@@ -156,8 +157,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"Document processing error: {str(e)}")
         await update.message.reply_text("Не удалось обработать документ. Поддерживаются .txt, .pdf и .docx файлы.")
 
-from telegram.ext import Application
-
+# Использование polling
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("ask", ask))
@@ -166,25 +166,4 @@ app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
 app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
 
-import asyncio
-from aiohttp import web
-
-async def webhook_handler(request):
-    update = Update.de_json(await request.json(), app.bot)
-    await app.process_update(update)
-    return web.Response(text="ok")
-
-async def main():
-    await app.bot.set_webhook("https://srv-cvtc9115pdvs739lcan0.onrender.com/webhook")
-    app_web = web.Application()
-    app_web.router.add_post("/webhook", webhook_handler)
-    runner = web.AppRunner(app_web)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 10000)))
-    await site.start()
-    logger.info("Webhook server started")
-    while True:
-        await asyncio.sleep(3600)
-
-if __name__ == '__main__':
-    asyncio.run(main())
+app.run_polling()
