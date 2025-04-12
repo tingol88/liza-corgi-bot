@@ -2,7 +2,6 @@ python-telegram-bot==20.6
 openai
 pydub
 ffmpeg-python
-flask
+requests
 python-docx
 PyMuPDF
-requests
