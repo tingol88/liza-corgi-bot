@@ -104,6 +104,18 @@ async def reference(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("К сожалению, ничего не нашла по твоему запросу. Попробуй другое слово или обучи меня через /learn")
 
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    help_text = (
+        "🐾 *Команды Лизы*:\n\n"
+        "/start — Приветствие и вводная\n"
+        "/learn — Обучить Лизу новому знанию (только админ)\n"
+        "/ref [запрос] — Найти в базе знаний\n"
+        "/clear — Очистить историю общения (только админ)\n"
+        "/help — Показать это меню\n\n"
+        "Можешь просто писать или отправлять голосовые/документы — Лиза всё поймёт!"
+    )
+    await update.message.reply_text(help_text, parse_mode="Markdown")
+
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_input = update.message.text.strip()
@@ -192,6 +204,7 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("learn", learn))
 app.add_handler(CommandHandler("ref", reference))
 app.add_handler(CommandHandler("clear", clear_conversation))
+app.add_handler(CommandHandler("help", help_command))
 app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
 app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
