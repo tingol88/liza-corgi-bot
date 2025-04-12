@@ -7,6 +7,7 @@ from pydub import AudioSegment
 import requests
 import fitz  # PyMuPDF
 import docx  # python-docx
+import sqlite3
 import json
 
 # Настройка логгера
@@ -32,55 +33,81 @@ SYSTEM_PROMPT = {
     "content": "Ты — Лиза, виртуальный помощник клининговой компании Cleaning-Moscow. Ты — умная, доброжелательная корги, которая помогает сотрудникам и клиентам. Говоришь дружелюбно, но по делу. Иногда можешь по-доброму и с юмором упомянуть своего хозяина Александра, подчеркивая его профессионализм, но делаешь это не слишком часто. Сайт: cleaning-moscow.ru."
 }
 
-# Функции для работы с контекстом
+# Функции для работы с контекстом и документами
+def create_db():
+    conn = sqlite3.connect("liza_db.db")
+    cursor = conn.cursor()
+
+    # Создаем таблицу для хранения контекста общения
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS conversations (
+        user_id INTEGER PRIMARY KEY,
+        context TEXT
+    )
+    ''')
+
+    # Создаем таблицу для хранения документов
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS documents (
+        user_id INTEGER,
+        document_name TEXT,
+        document_content TEXT,
+        PRIMARY KEY (user_id, document_name)
+    )
+    ''')
+
+    conn.commit()
+    conn.close()
+
+# Функция для сохранения контекста общения
 def save_conversation(user_id, message):
-    file_path = "conversations.json"
-    try:
-        with open(file_path, "r") as f:
-            conversations = json.load(f)
-    except FileNotFoundError:
-        conversations = {}
+    conn = sqlite3.connect("liza_db.db")
+    cursor = conn.cursor()
 
-    if user_id not in conversations:
-        conversations[user_id] = []
+    cursor.execute("SELECT * FROM conversations WHERE user_id = ?", (user_id,))
+    existing_data = cursor.fetchone()
 
-    # Добавляем новое сообщение в контекст
-    conversations[user_id].append(message)
-
-    # Ограничиваем количество сообщений (например, 5 последних сообщений)
-    if len(conversations[user_id]) > 5:
-        conversations[user_id] = conversations[user_id][-5:]
-
-    # Сохраняем обновленный контекст
-    with open(file_path, "w") as f:
-        json.dump(conversations, f)
-
-def get_conversation(user_id):
-    try:
-        with open("conversations.json", "r") as f:
-            conversations = json.load(f)
-        return conversations.get(user_id, [])
-    except FileNotFoundError:
-        return []
-
-async def clear_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id in admin_ids:
-        try:
-            with open("conversations.json", "r") as f:
-                conversations = json.load(f)
-
-            if user_id in conversations:
-                del conversations[user_id]
-
-            with open("conversations.json", "w") as f:
-                json.dump(conversations, f)
-
-            await update.message.reply_text("Контекст общения был очищен.")
-        except Exception as e:
-            await update.message.reply_text(f"Не удалось очистить контекст: {e}")
+    if existing_data:
+        cursor.execute("UPDATE conversations SET context = ? WHERE user_id = ?", (message, user_id))
     else:
-        await update.message.reply_text("Извините, только администратор может очистить контекст.")
+        cursor.execute("INSERT INTO conversations (user_id, context) VALUES (?, ?)", (user_id, message))
+
+    conn.commit()
+    conn.close()
+
+# Функция для получения контекста общения
+def get_conversation(user_id):
+    conn = sqlite3.connect("liza_db.db")
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT context FROM conversations WHERE user_id = ?", (user_id,))
+    result = cursor.fetchone()
+
+    conn.close()
+    return result[0] if result else ""
+
+# Функция для сохранения документов
+def save_document(user_id, document_name, document_content):
+    conn = sqlite3.connect("liza_db.db")
+    cursor = conn.cursor()
+
+    cursor.execute("INSERT OR REPLACE INTO documents (user_id, document_name, document_content) VALUES (?, ?, ?)",
+                   (user_id, document_name, document_content))
+
+    conn.commit()
+    conn.close()
+
+# Функция для получения документа
+def get_document(user_id, document_name):
+    conn = sqlite3.connect("liza_db.db")
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT document_content FROM documents WHERE user_id = ? AND document_name = ?",
+                   (user_id, document_name))
+    result = cursor.fetchone()
+
+    conn.close()
+    return result[0] if result else None
 
 # Функции обработки команд
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -159,13 +186,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Получаем контекст общения
     conversation = get_conversation(user_id)
-    conversation.append(user_input)
+    conversation += f"\n{user_input}"
 
     # Сохраняем контекст
-    save_conversation(user_id, user_input)
+    save_conversation(user_id, conversation)
 
     # Подаем контекст как часть запроса к OpenAI
-    context_str = "\n".join(conversation)
+    context_str = conversation
 
     try:
         completion = openai.chat.completions.create(
@@ -204,7 +231,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Пожалуйста, отправьте .txt, .pdf или .docx файл.")
             return
 
-        # Сохраняем данные в памяти
+        # Сохраняем данные в базе
         if update.effective_user.id in admin_ids:
             save_conversation(update.effective_user.id, content)
 
@@ -233,5 +260,7 @@ app.add_handler(CommandHandler("clear", clear_conversation))  # Команда �
 app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
 app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
+
+create_db()  # Создаем базу данных и таблицы
 
 app.run_polling()
