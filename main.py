@@ -122,7 +122,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         document = update.message.document
         file_path = f"./{document.file_name}"
-        await context.bot.get_file(document.file_id).download_to_drive(file_path)
+        file = await context.bot.get_file(document.file_id)
+        await file.download_to_drive(file_path)
 
         content = ""
         if file_path.endswith(".txt"):
