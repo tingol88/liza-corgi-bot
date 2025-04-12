@@ -26,10 +26,102 @@ BOT_TOKEN = os.environ["BOT_TOKEN"]
 
 SYSTEM_PROMPT = {
     "role": "system",
-    "content": "Ты — Лиза, виртуальный помощник клининговой компании Cleaning-Moscow. Ты — умная, доброжелательная корги, которая помогает сотрудникам и клиентам. Говоришь дружелюбно, но по делу. Иногда можешь по-доброму пошутить на счёт своего хозяина Александра, но не роняя его авторитет как руководителя компании. Сайт: cleaning-moscow.ru."
+    "content": \"Ты — Лиза, виртуальный помощник клининговой компании Cleaning-Moscow. Ты — умная, доброжелательная корги, которая помогает сотрудникам и клиентам. Говоришь дружелюбно, но по делу. Иногда можешь по-доброму и с юмором упомянуть своего хозяина Александра, подчеркивая его профессионализм, но делаешь это не слишком часто. Сайт: cleaning-moscow.ru.\"
 }
 
-# ... все функции start, ask, debug, handle_voice, handle_text остаются без изменений ...
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"User {update.effective_user.id} sent /start")
+    await update.message.reply_text("Гав-гав! 🐾 Я Лиза Корги — виртуальный помощник клининговой компании Cleaning-Moscow. Можешь задать вопрос или отправить голосовое сообщение!")
+
+async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    question = ' '.join(context.args)
+    logger.info(f"User {update.effective_user.id} asked via /ask: {question}")
+    if not question:
+        await update.message.reply_text("Напиши вопрос после команды /ask, например: /ask сделай шаблон письма для клиента")
+        return
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                SYSTEM_PROMPT,
+                {"role": "user", "content": question}
+            ]
+        )
+        answer = response.choices[0].message.content
+        await update.message.reply_text(answer)
+    except Exception as e:
+        logger.exception("Error in /ask")
+        if ADMIN_CHAT_ID:
+            await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"/ask error: {str(e)}")
+
+async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_CHAT_ID:
+        await update.message.reply_text("Извините, эта команда только для администратора.")
+        return
+    try:
+        with open("liza_corgi.log", "r") as f:
+            lines = f.readlines()[-20:]
+        log_text = "".join(lines)
+        await update.message.reply_text(f"Последние строки из логов:
+
+{log_text}")
+    except Exception as e:
+        await update.message.reply_text(f"Не удалось прочитать лог: {e}")
+
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.chat.type != "private" and not update.message.text and f"@{context.bot.username}" not in (update.message.caption or ""):
+        return
+    logger.info(f"User {update.effective_user.id} sent voice message")
+    try:
+        voice = update.message.voice
+        file = await context.bot.get_file(voice.file_id)
+        file_path = "voice.ogg"
+        mp3_path = "voice.mp3"
+        await file.download_to_drive(file_path)
+        AudioSegment.from_file(file_path).export(mp3_path, format="mp3")
+        with open(mp3_path, "rb") as audio_file:
+            transcript = openai.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file
+            )
+        text = transcript.text
+        logger.info(f"Transcribed: {text}")
+        completion = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                SYSTEM_PROMPT,
+                {"role": "user", "content": text}
+            ]
+        )
+        answer = completion.choices[0].message.content
+        await update.message.reply_text(f"Ты сказал(а): {text}
+
+Мой ответ:
+{answer}")
+    except Exception as e:
+        logger.exception("Error in voice processing")
+        if ADMIN_CHAT_ID:
+            await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"Voice message error: {str(e)}")
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message.chat.type != "private" and f"@{context.bot.username}" not in update.message.text:
+        return
+    user_input = update.message.text
+    logger.info(f"User {update.effective_user.id} wrote: {user_input}")
+    try:
+        completion = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                SYSTEM_PROMPT,
+                {"role": "user", "content": user_input}
+            ]
+        )
+        answer = completion.choices[0].message.content
+        await update.message.reply_text(answer)
+    except Exception as e:
+        logger.exception("Error in text message")
+        if ADMIN_CHAT_ID:
+            await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"Text error: {str(e)}")
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
