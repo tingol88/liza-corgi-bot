@@ -156,6 +156,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"Document processing error: {str(e)}")
         await update.message.reply_text("Не удалось обработать документ. Поддерживаются .txt, .pdf и .docx файлы.")
 
+from telegram.ext import Application
+
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("ask", ask))
@@ -163,4 +165,26 @@ app.add_handler(CommandHandler("debug", debug))
 app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
 app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
-app.run_polling()
+
+import asyncio
+from aiohttp import web
+
+async def webhook_handler(request):
+    update = Update.de_json(await request.json(), app.bot)
+    await app.process_update(update)
+    return web.Response(text="ok")
+
+async def main():
+    await app.bot.set_webhook("https://srv-cvtc9115pdvs739lcan0.onrender.com/webhook")
+    app_web = web.Application()
+    app_web.router.add_post("/webhook", webhook_handler)
+    runner = web.AppRunner(app_web)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 10000)))
+    await site.start()
+    logger.info("Webhook server started")
+    while True:
+        await asyncio.sleep(3600)
+
+if __name__ == '__main__':
+    asyncio.run(main())
