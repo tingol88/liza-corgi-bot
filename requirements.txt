@@ -5,3 +5,4 @@ ffmpeg-python
 requests
 python-docx
 PyMuPDF
+aiohttp
