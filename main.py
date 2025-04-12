@@ -147,6 +147,24 @@ async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Не удалось прочитать лог: {e}")
 
+async def clear_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in admin_ids:
+        await update.message.reply_text("Извините, только администратор может очистить контекст.")
+        return
+
+    try:
+        conn = sqlite3.connect("liza_db.db")
+        cursor = conn.cursor()
+
+        cursor.execute("DELETE FROM conversations WHERE user_id = ?", (user_id,))
+        conn.commit()
+        conn.close()
+
+        await update.message.reply_text("Контекст общения был очищен.")
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка при очистке контекста: {e}")
+
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type != "private" and not update.message.text and f"@{context.bot.username}" not in (update.message.caption or ""):
         return
@@ -191,15 +209,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Сохраняем контекст
     save_conversation(user_id, conversation)
 
-    # Подаем контекст как часть запроса к OpenAI
-    context_str = conversation
-
     try:
         completion = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
                 SYSTEM_PROMPT,
-                {"role": "user", "content": context_str}
+                {"role": "user", "content": conversation}
             ]
         )
         answer = completion.choices[0].message.content
@@ -231,7 +246,6 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Пожалуйста, отправьте .txt, .pdf или .docx файл.")
             return
 
-        # Сохраняем данные в базе
         if update.effective_user.id in admin_ids:
             save_conversation(update.effective_user.id, content)
 
@@ -256,11 +270,10 @@ app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("ask", ask))
 app.add_handler(CommandHandler("debug", debug))
-app.add_handler(CommandHandler("clear", clear_conversation))  # Команда очистки контекста
+app.add_handler(CommandHandler("clear", clear_conversation))
 app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
 app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
 
-create_db()  # Создаем базу данных и таблицы
-
+create_db()
 app.run_polling()
