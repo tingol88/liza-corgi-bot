@@ -7,6 +7,7 @@ from pydub import AudioSegment
 import requests
 import fitz  # PyMuPDF
 import docx  # python-docx
+import json
 
 # Настройка логгера
 logging.basicConfig(
@@ -19,7 +20,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Идентификаторы администраторов
 ADMIN_CHAT_ID = int(os.environ.get("ADMIN_CHAT_ID", "0"))
+admin_ids = [126204360, ADMIN_CHAT_ID]  # Добавлены новые администраторы
 
 openai.api_key = os.environ["OPENAI_API_KEY"]
 BOT_TOKEN = os.environ["BOT_TOKEN"]
@@ -28,6 +31,56 @@ SYSTEM_PROMPT = {
     "role": "system",
     "content": "Ты — Лиза, виртуальный помощник клининговой компании Cleaning-Moscow. Ты — умная, доброжелательная корги, которая помогает сотрудникам и клиентам. Говоришь дружелюбно, но по делу. Иногда можешь по-доброму и с юмором упомянуть своего хозяина Александра, подчеркивая его профессионализм, но делаешь это не слишком часто. Сайт: cleaning-moscow.ru."
 }
+
+# Функции для работы с контекстом
+def save_conversation(user_id, message):
+    file_path = "conversations.json"
+    try:
+        with open(file_path, "r") as f:
+            conversations = json.load(f)
+    except FileNotFoundError:
+        conversations = {}
+
+    if user_id not in conversations:
+        conversations[user_id] = []
+
+    # Добавляем новое сообщение в контекст
+    conversations[user_id].append(message)
+
+    # Ограничиваем количество сообщений (например, 5 последних сообщений)
+    if len(conversations[user_id]) > 5:
+        conversations[user_id] = conversations[user_id][-5:]
+
+    # Сохраняем обновленный контекст
+    with open(file_path, "w") as f:
+        json.dump(conversations, f)
+
+def get_conversation(user_id):
+    try:
+        with open("conversations.json", "r") as f:
+            conversations = json.load(f)
+        return conversations.get(user_id, [])
+    except FileNotFoundError:
+        return []
+
+async def clear_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id in admin_ids:
+        try:
+            with open("conversations.json", "r") as f:
+                conversations = json.load(f)
+
+            if user_id in conversations:
+                del conversations[user_id]
+
+            with open("conversations.json", "w") as f:
+                json.dump(conversations, f)
+
+            await update.message.reply_text("Контекст общения был очищен.")
+        except Exception as e:
+            await update.message.reply_text(f"Не удалось очистить контекст: {e}")
+    else:
+        await update.message.reply_text("Извините, только администратор может очистить контекст.")
 
 # Функции обработки команд
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -56,7 +109,7 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"/ask error: {str(e)}")
 
 async def debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_CHAT_ID:
+    if update.effective_user.id not in admin_ids:
         await update.message.reply_text("Извините, эта команда только для администратора.")
         return
     try:
@@ -100,16 +153,26 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"Voice message error: {str(e)}")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.chat.type != "private" and f"@{context.bot.username}" not in update.message.text:
-        return
+    user_id = update.effective_user.id
     user_input = update.message.text
-    logger.info(f"User {update.effective_user.id} wrote: {user_input}")
+    logger.info(f"User {user_id} wrote: {user_input}")
+
+    # Получаем контекст общения
+    conversation = get_conversation(user_id)
+    conversation.append(user_input)
+
+    # Сохраняем контекст
+    save_conversation(user_id, user_input)
+
+    # Подаем контекст как часть запроса к OpenAI
+    context_str = "\n".join(conversation)
+
     try:
         completion = openai.chat.completions.create(
             model="gpt-4o",
             messages=[
                 SYSTEM_PROMPT,
-                {"role": "user", "content": user_input}
+                {"role": "user", "content": context_str}
             ]
         )
         answer = completion.choices[0].message.content
@@ -141,6 +204,10 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Пожалуйста, отправьте .txt, .pdf или .docx файл.")
             return
 
+        # Сохраняем данные в памяти
+        if update.effective_user.id in admin_ids:
+            save_conversation(update.effective_user.id, content)
+
         logger.info(f"Received document from {update.effective_user.id}: {document.file_name}")
         completion = openai.chat.completions.create(
             model="gpt-4o",
@@ -162,6 +229,7 @@ app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("ask", ask))
 app.add_handler(CommandHandler("debug", debug))
+app.add_handler(CommandHandler("clear", clear_conversation))  # Команда очистки контекста
 app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
 app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
