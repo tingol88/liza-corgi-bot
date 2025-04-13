@@ -193,16 +193,30 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file = await context.bot.get_file(voice.file_id)
         file_path = "voice.ogg"
         mp3_path = "voice.mp3"
+
         await file.download_to_drive(file_path)
-        AudioSegment.from_file(file_path).export(mp3_path, format="mp3")
+
+        # Конвертация OGG в MP3
+        audio = AudioSegment.from_file(file_path)
+        audio.export(mp3_path, format="mp3")
+
+        # Распознавание речи
         with open(mp3_path, "rb") as audio_file:
-            transcript = openai.audio.transcriptions.create(model="whisper-1", file=audio_file)
-        text = transcript.text
+            transcript = openai.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file
+            )
+        text = transcript.text.strip()
         logger.info(f"Transcribed: {text}")
+
+        # Подмена текстового сообщения для передачи в handle_text
+        update.message.text = text
         await handle_text(update, context)
+
     except Exception as e:
         logger.exception("Error in voice processing")
         await update.message.reply_text("Произошла ошибка при обработке голосового сообщения.")
+
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
