@@ -150,41 +150,30 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Можешь просто писать или отправлять голосовые/документы — Лиза всё поймёт!"
     )
     await update.message.reply_text(help_text, parse_mode="Markdown")
+    
+async def process_user_input(user_id, user_input, context, send_reply):
+    logger.info(f"User {user_id} wrote: {user_input}")
+    context_history = get_conversation(user_id)
+    context_history += f"\n{user_input}"
+    save_conversation(user_id, context_history)
+    knowledge_matches = get_relevant_knowledge(user_input)
+    knowledge_text = "\n\n".join(knowledge_matches)
+    try:
+        messages = [SYSTEM_PROMPT, {"role": "user", "content": f"{knowledge_text}\n\nВопрос: {user_input}"}]
+        completion = openai.chat.completions.create(model="gpt-4o", messages=messages)
+        answer = completion.choices[0].message.content
+        await send_reply(answer)
+    except Exception as e:
+        logger.exception("Error in user input processing")
+        if ADMIN_CHAT_ID:
+            await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"Text error: {str(e)}")
+        await send_reply("Произошла ошибка при обработке запроса.")
+
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_input = update.message.text.strip()
-    logger.info(f"User {user_id} wrote: {user_input}")
-
-    # Получаем историю общения
-    context_history = get_conversation(user_id)
-    context_history += f"\n{user_input}"
-    save_conversation(user_id, context_history)
-
-    # Получаем знания, релевантные текущему запросу
-    knowledge_matches = get_relevant_knowledge(user_input)
-    knowledge_text = "\n\n".join(knowledge_matches)
-
-    # Если пользователь спрашивает, что Лиза узнала из документа
-    if "что узнала из документа" in user_input.lower() and knowledge_text.strip():
-        response_text = f"Я узнала следующее из последних добавленных данных:\n\n{knowledge_text}"
-        await update.message.reply_text(response_text)
-        return
-
-    try:
-        # Отправляем контекст и знания в OpenAI
-        messages = [
-            SYSTEM_PROMPT,
-            {"role": "user", "content": f"{knowledge_text}\n\nВопрос: {user_input}"}
-        ]
-        completion = openai.chat.completions.create(model="gpt-4o", messages=messages)
-        answer = completion.choices[0].message.content
-        await update.message.reply_text(answer)
-    except Exception as e:
-        logger.exception("Error in text message")
-        if ADMIN_CHAT_ID:
-            await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"Text error: {str(e)}")
-        await update.message.reply_text("Произошла ошибка при обработке запроса.")
+    await process_user_input(user_id, user_input, context, update.message.reply_text)
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -193,25 +182,15 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file = await context.bot.get_file(voice.file_id)
         file_path = "voice.ogg"
         mp3_path = "voice.mp3"
-
         await file.download_to_drive(file_path)
-
-        # Конвертация OGG в MP3
-        audio = AudioSegment.from_file(file_path)
-        audio.export(mp3_path, format="mp3")
-
-        # Распознавание речи
+        AudioSegment.from_file(file_path).export(mp3_path, format="mp3")
         with open(mp3_path, "rb") as audio_file:
-            transcript = openai.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file
-            )
+            transcript = openai.audio.transcriptions.create(model="whisper-1", file=audio_file)
         text = transcript.text.strip()
         logger.info(f"Transcribed: {text}")
 
-        # Подмена текстового сообщения для передачи в handle_text
-        update.message.text = text
-        await handle_text(update, context)
+        user_id = update.effective_user.id
+        await process_user_input(user_id, text, context, update.message.reply_text)
 
     except Exception as e:
         logger.exception("Error in voice processing")
