@@ -2,7 +2,7 @@ import os
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
-GOOGLE_CREDENTIALS_PATH = os.environ.get("GOOGLE_CREDENTIALS_PATH", "tensile-method-305310-be43f14388ea.json")
+GOOGLE_CREDENTIALS_PATH = os.environ["GOOGLE_CREDENTIALS_PATH"]
 
 def get_google_docs_text(document_id):
     creds = service_account.Credentials.from_service_account_file(GOOGLE_CREDENTIALS_PATH)
