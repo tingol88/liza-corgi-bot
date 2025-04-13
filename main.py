@@ -155,13 +155,28 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user_input = update.message.text.strip()
     logger.info(f"User {user_id} wrote: {user_input}")
+
+    # Получаем историю общения
     context_history = get_conversation(user_id)
     context_history += f"\n{user_input}"
     save_conversation(user_id, context_history)
+
+    # Получаем знания, релевантные текущему запросу
     knowledge_matches = get_relevant_knowledge(user_input)
     knowledge_text = "\n\n".join(knowledge_matches)
+
+    # Если пользователь спрашивает, что Лиза узнала из документа
+    if "что узнала из документа" in user_input.lower() and knowledge_text.strip():
+        response_text = f"Я узнала следующее из последних добавленных данных:\n\n{knowledge_text}"
+        await update.message.reply_text(response_text)
+        return
+
     try:
-        messages = [SYSTEM_PROMPT, {"role": "user", "content": f"{knowledge_text}\n\nВопрос: {user_input}"}]
+        # Отправляем контекст и знания в OpenAI
+        messages = [
+            SYSTEM_PROMPT,
+            {"role": "user", "content": f"{knowledge_text}\n\nВопрос: {user_input}"}
+        ]
         completion = openai.chat.completions.create(model="gpt-4o", messages=messages)
         answer = completion.choices[0].message.content
         await update.message.reply_text(answer)
@@ -170,6 +185,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if ADMIN_CHAT_ID:
             await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"Text error: {str(e)}")
         await update.message.reply_text("Произошла ошибка при обработке запроса.")
+
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
