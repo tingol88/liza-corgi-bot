@@ -1,0 +1,111 @@
+import os
+import openai
+import logging
+import asyncio
+import fitz
+import docx
+from pydub import AudioSegment
+from telegram import Update
+from telegram.ext import ContextTypes
+from db_utils import get_conversation, save_conversation, get_relevant_knowledge
+
+logger = logging.getLogger(__name__)
+openai.api_key = os.environ["OPENAI_API_KEY"]
+SYSTEM_PROMPT = {
+    "role": "system",
+    "content": "Ты — Лиза, виртуальный помощник клининговой компании Cleaning-Moscow. Ты гордишся нашей компанией. Ты хорошо разбираешься в клининге, но можешь помочь и с другими вопросами — по жизни, бизнесу, технологиям и многому другому. Ты умная, доброжелательная и любознательная."
+}
+
+
+async def process_user_input(user_id, user_input, context, send_reply):
+    logger.info(f"User {user_id} wrote: {user_input}")
+    context_history = get_conversation(user_id)
+    context_history += f"\n{user_input}"
+    save_conversation(user_id, context_history)
+
+    knowledge_matches = get_relevant_knowledge(user_input)
+    knowledge_text = "\n\n".join(knowledge_matches)
+
+    try:
+        messages = [SYSTEM_PROMPT, {"role": "user", "content": f"{knowledge_text}\n\nВопрос: {user_input}"}]
+        completion = openai.chat.completions.create(model="gpt-4o", messages=messages)
+        answer = completion.choices[0].message.content
+        await send_reply(answer)
+    except Exception as e:
+        logger.exception("Error in user input processing")
+        await send_reply("Произошла ошибка при обработке запроса.")
+
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_input = update.message.text.strip()
+    await process_user_input(user_id, user_input, context, update.message.reply_text)
+
+
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        voice = update.message.voice
+        file = await context.bot.get_file(voice.file_id)
+        file_path = "voice.ogg"
+        mp3_path = "voice.mp3"
+        await file.download_to_drive(file_path)
+        AudioSegment.from_file(file_path).export(mp3_path, format="mp3")
+
+        with open(mp3_path, "rb") as audio_file:
+            transcript = openai.audio.transcriptions.create(model="whisper-1", file=audio_file)
+
+        text = transcript.text.strip()
+        logger.info(f"Transcribed: {text}")
+
+        user_id = update.effective_user.id
+        await process_user_input(user_id, text, context, update.message.reply_text)
+
+    except Exception as e:
+        logger.exception("Error in voice processing")
+        await update.message.reply_text("Произошла ошибка при обработке голосового сообщения.")
+
+
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        document = update.message.document
+        file_path = f"./{document.file_name}"
+        file = await context.bot.get_file(document.file_id)
+        await file.download_to_drive(file_path)
+        content = ""
+
+        if file_path.endswith(".txt"):
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+        elif file_path.endswith(".pdf"):
+            with fitz.open(file_path) as pdf:
+                for page in pdf:
+                    content += page.get_text()
+        elif file_path.endswith(".docx"):
+            doc = docx.Document(file_path)
+            content = "\n".join([para.text for para in doc.paragraphs])
+        else:
+            await update.message.reply_text("Пожалуйста, отправьте .txt, .pdf или .docx файл.")
+            return
+
+        if update.effective_user.id:
+            save_conversation(update.effective_user.id, content)
+
+        logger.info(f"Received document from {update.effective_user.id}: {document.file_name}")
+        await update.message.reply_text("Файл принят и обработан. Я запомнила информацию!")
+
+    except Exception as e:
+        logger.exception("Error in document processing")
+        await update.message.reply_text("Не удалось обработать документ. Поддерживаются .txt, .pdf и .docx файлы.")
+
+
+async def sync_every_hour():
+    from google_connect import sync_drive_folder_to_knowledge
+    folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
+    while True:
+        try:
+            if folder_id:
+                logging.info("⏳ Автоматическая синхронизация папки Google Диска")
+                sync_drive_folder_to_knowledge(folder_id)
+        except Exception as e:
+            logging.error(f"Ошибка при авто-синхронизации: {e}")
+        await asyncio.sleep(3600)
