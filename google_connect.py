@@ -6,7 +6,7 @@ import mimetypes
 from io import BytesIO
 import fitz  # PyMuPDF
 import docx
-from db import save_knowledge
+from db_utils import save_knowledge
 
 GOOGLE_CREDENTIALS_PATH = os.environ["GOOGLE_CREDENTIALS_PATH"]
 
