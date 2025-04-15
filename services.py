@@ -1,58 +1,103 @@
+import openai
+import logging
 import sqlite3
-from datetime import datetime
+import os
+import fitz  # PyMuPDF
+import docx
+from pydub import AudioSegment
+
+from db_utils import save_conversation, get_conversation, get_relevant_knowledge
+
+logger = logging.getLogger(__name__)
+openai.api_key = os.environ["OPENAI_API_KEY"]
+
+SYSTEM_PROMPT = {
+    "role": "system",
+    "content": "Ты — Лиза, виртуальный помощник клининговой компании Cleaning-Moscow. Ты гордишся нашей компанией. Ты хорошо разбираешься в клининге, но можешь помочь и с другими вопросами — по жизни, бизнесу, технологиям и многому другому. Ты умная, доброжелательная и любознательная."
+}
 
 
-def create_db():
-    conn = sqlite3.connect("liza_db.db")
-    cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS conversations (user_id INTEGER PRIMARY KEY, context TEXT)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS documents (user_id INTEGER, document_name TEXT, document_content TEXT, PRIMARY KEY (user_id, document_name))''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS knowledge (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, content TEXT, added_by INTEGER, timestamp TEXT)''')
-    conn.commit()
-    conn.close()
+async def process_user_input(user_id, user_input, context, send_reply):
+    logger.info(f"User {user_id} wrote: {user_input}")
+    context_history = get_conversation(user_id)
+    context_history += f"\n{user_input}"
+    save_conversation(user_id, context_history)
+    knowledge_matches = get_relevant_knowledge(user_input)
+    knowledge_text = "\n\n".join(knowledge_matches)
+    try:
+        messages = [SYSTEM_PROMPT, {"role": "user", "content": f"{knowledge_text}\n\nВопрос: {user_input}"}]
+        completion = openai.chat.completions.create(model="gpt-4o", messages=messages)
+        answer = completion.choices[0].message.content
+        await send_reply(answer)
+    except Exception as e:
+        logger.exception("Error in user input processing")
+        await send_reply("Произошла ошибка при обработке запроса.")
 
 
-def save_conversation(user_id, message):
-    conn = sqlite3.connect("liza_db.db")
-    cursor = conn.cursor()
-    cursor.execute("REPLACE INTO conversations (user_id, context) VALUES (?, ?)", (user_id, message))
-    conn.commit()
-    conn.close()
+async def handle_text(update, context):
+    user_id = update.effective_user.id
+    user_input = update.message.text.strip()
+    await process_user_input(user_id, user_input, context, update.message.reply_text)
 
 
-def get_conversation(user_id):
-    conn = sqlite3.connect("liza_db.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT context FROM conversations WHERE user_id = ?", (user_id,))
-    result = cursor.fetchone()
-    conn.close()
-    return result[0] if result else ""
+async def handle_voice(update, context):
+    try:
+        voice = update.message.voice
+        file = await context.bot.get_file(voice.file_id)
+        file_path = "voice.ogg"
+        mp3_path = "voice.mp3"
+        await file.download_to_drive(file_path)
+        AudioSegment.from_file(file_path).export(mp3_path, format="mp3")
+        with open(mp3_path, "rb") as audio_file:
+            transcript = openai.audio.transcriptions.create(model="whisper-1", file=audio_file)
+        text = transcript.text.strip()
+        logger.info(f"Transcribed: {text}")
+
+        user_id = update.effective_user.id
+        await process_user_input(user_id, text, context, update.message.reply_text)
+
+    except Exception as e:
+        logger.exception("Error in voice processing")
+        await update.message.reply_text("Произошла ошибка при обработке голосового сообщения.")
 
 
-def save_knowledge(title, content, added_by):
-    conn = sqlite3.connect("liza_db.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT 1 FROM knowledge WHERE title = ? AND content = ?", (title, content))
-    if not cursor.fetchone():
-        cursor.execute("INSERT INTO knowledge (title, content, added_by, timestamp) VALUES (?, ?, ?, ?)",
-                       (title, content, added_by, datetime.now().isoformat()))
-        conn.commit()
-    conn.close()
+async def handle_document(update, context):
+    try:
+        document = update.message.document
+        file_path = f"./{document.file_name}"
+        file = await context.bot.get_file(document.file_id)
+        await file.download_to_drive(file_path)
+        content = ""
+        if file_path.endswith(".txt"):
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+        elif file_path.endswith(".pdf"):
+            with fitz.open(file_path) as pdf:
+                for page in pdf:
+                    content += page.get_text()
+        elif file_path.endswith(".docx"):
+            doc = docx.Document(file_path)
+            content = "\n".join([para.text for para in doc.paragraphs])
+        else:
+            await update.message.reply_text("Пожалуйста, отправьте .txt, .pdf или .docx файл.")
+            return
+
+        save_conversation(update.effective_user.id, content)
+        logger.info(f"Received document from {update.effective_user.id}: {document.file_name}")
+        await update.message.reply_text("Файл принят и обработан. Я запомнила информацию!")
+    except Exception as e:
+        logger.exception("Error in document processing")
+        await update.message.reply_text("Не удалось обработать документ. Поддерживаются .txt, .pdf и .docx файлы.")
 
 
-def get_relevant_knowledge(query, limit=3):
-    conn = sqlite3.connect("liza_db.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT title, content FROM knowledge WHERE content LIKE ? ORDER BY timestamp DESC LIMIT ?", (f"%{query}%", limit))
-    results = cursor.fetchall()
-    conn.close()
-    return [f"{title}\n{content}" for title, content in results]
-
-
-def find_knowledge_by_keyword(keyword):
-    conn = sqlite3.connect("liza_db.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT title, content FROM knowledge WHERE content LIKE ? ORDER BY timestamp DESC LIMIT 1", (f"%{keyword}%",))
-    result = cursor.fetchone()
-    conn.close()
-    return result
+async def sync_every_hour():
+    from google_connect import sync_drive_folder_to_knowledge
+    folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
+    while True:
+        try:
+            logger.info("⏳ Автоматическая синхронизация папки Google Диска")
+            if folder_id:
+                sync_drive_folder_to_knowledge(folder_id)
+        except Exception as e:
+            logger.error(f"Ошибка при авто-синхронизации: {e}")
+        await asyncio.sleep(3600)
