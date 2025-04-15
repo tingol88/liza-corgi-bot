@@ -4,13 +4,11 @@ import logging
 import requests
 import fitz  # PyMuPDF
 import docx  # python-docx
-import sqlite3
 import json
 import asyncio
 from telegram import Update, Document
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from pydub import AudioSegment
-from datetime import datetime
 from google_connect import get_google_docs_text, get_google_sheet_values, sync_drive_folder_to_knowledge
 from db_utils import (
     create_db,
@@ -19,7 +17,6 @@ from db_utils import (
     save_knowledge,
     get_relevant_knowledge
 )
-
 
 # Настройка логгера
 logging.basicConfig(
