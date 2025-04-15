@@ -2,6 +2,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from db_utils import save_conversation, save_knowledge, find_knowledge_by_keyword
 from google_connect import get_google_docs_text, get_google_sheet_values, sync_drive_folder_to_knowledge
+import sqlite3
 
 ADMIN_IDS = [126204360]
 
@@ -16,6 +17,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/start — Приветствие и вводная\n"
         "/learn — Обучить Лизу новому знанию (только админ)\n"
         "/ref [запрос] — Найти в базе знаний\n"
+        "/list_knowledge [n] — Показать последние записи (до 1000)\n"
         "/clear — Очистить историю общения (только админ)\n"
         "/help — Показать это меню\n"
     )
@@ -34,8 +36,11 @@ async def learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = text.split("\n", 1)
     title = lines[0][:100]
     content = lines[1] if len(lines) > 1 else lines[0]
-    save_knowledge(title, content, user_id)
-    await update.message.reply_text(f"Спасибо, Александр! Я запомнила информацию под названием: \"{title}\"")
+    try:
+        save_knowledge(title, content, user_id)
+        await update.message.reply_text(f"Спасибо, Александр! Я запомнила информацию под названием: \"{title}\"")
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ {e}")
 
 
 async def reference(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -48,6 +53,7 @@ async def reference(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"🔎 Нашла в базе знаний:\n\n*{result[0]}*\n\n{result[1][:3000]}", parse_mode="Markdown")
     else:
         await update.message.reply_text("К сожалению, ничего не нашла по твоему запросу. Попробуй другое слово или обучи меня через /learn")
+
 
 async def list_knowledge(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
@@ -70,18 +76,18 @@ async def list_knowledge(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("База знаний пока пуста.")
         return
 
-    message = f"🧠 Последние {len(rows)} знаний в базе:\n\n"
+    message = f"🧐 Последние {len(rows)} знаний в базе:\n\n"
     for i, (id_, title, timestamp) in enumerate(rows, 1):
         short_title = title[:60] + "..." if len(title) > 60 else title
         message += f"{i}. [ID: {id_}] {short_title} ({timestamp[:19]})\n"
     await update.message.reply_text(message)
+
 
 async def clear_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in ADMIN_IDS:
         await update.message.reply_text("Извините, только администратор может очистить контекст.")
         return
-    from db_utils import sqlite3
     try:
         conn = sqlite3.connect("liza_db.db")
         cursor = conn.cursor()
@@ -142,12 +148,12 @@ async def sync_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Ошибка при синхронизации: {e}")
 
+
 async def debug_knowledge(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
         await update.message.reply_text("⛔ Только администратор может использовать отладку.")
         return
 
-    import sqlite3
     conn = sqlite3.connect("liza_db.db")
     cursor = conn.cursor()
     cursor.execute("SELECT title, content, timestamp FROM knowledge ORDER BY timestamp DESC LIMIT 5")
@@ -155,7 +161,7 @@ async def debug_knowledge(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.close()
 
     if not rows:
-        await update.message.reply_text("📭 База знаний пуста.")
+        await update.message.reply_text("📬 База знаний пуста.")
         return
 
     msg = "🧠 *Последние знания в базе:*\n\n"
@@ -164,4 +170,3 @@ async def debug_knowledge(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg += f"{i}. *{title}* ({ts[:19]})\n_{short}_\n\n"
 
     await update.message.reply_text(msg, parse_mode="Markdown")
-
