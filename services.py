@@ -1,111 +1,172 @@
-import os
-import openai
-import logging
-import asyncio
-import fitz
-import docx
-from pydub import AudioSegment
 from telegram import Update
 from telegram.ext import ContextTypes
-from db_utils import get_conversation, save_conversation, get_relevant_knowledge
+from db_utils import save_conversation, save_knowledge, find_knowledge_by_keyword
+from google_connect import get_google_docs_text, get_google_sheet_values, sync_drive_folder_to_knowledge
+import sqlite3
 
-logger = logging.getLogger(__name__)
-openai.api_key = os.environ["OPENAI_API_KEY"]
-SYSTEM_PROMPT = {
-    "role": "system",
-    "content": "Ты — Лиза, виртуальный помощник клининговой компании Cleaning-Moscow. Ты гордишся нашей компанией. Ты хорошо разбираешься в клининге, но можешь помочь и с другими вопросами — по жизни, бизнесу, технологиям и многому другому. Ты умная, доброжелательная и любознательная."
-}
+ADMIN_IDS = [126204360]
 
 
-async def process_user_input(user_id, user_input, context, send_reply):
-    logger.info(f"User {user_id} wrote: {user_input}")
-    context_history = get_conversation(user_id)
-    context_history += f"\n{user_input}"
-    save_conversation(user_id, context_history)
-
-    knowledge_matches = get_relevant_knowledge(user_input)
-    knowledge_text = "\n\n".join(knowledge_matches)
-
-    try:
-        messages = [SYSTEM_PROMPT, {"role": "user", "content": f"{knowledge_text}\n\nВопрос: {user_input}"}]
-        completion = openai.chat.completions.create(model="gpt-4o", messages=messages)
-        answer = completion.choices[0].message.content
-        await send_reply(answer)
-    except Exception as e:
-        logger.exception("Error in user input processing")
-        await send_reply("Произошла ошибка при обработке запроса.")
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Гав-гав! 🐾 Я Лиза Корги — виртуальный помощник клининговой компании Cleaning-Moscow. Можешь задать вопрос или отправить голосовое сообщение!")
 
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    help_text = (
+        "🛠️ *Команды Лизы*:\n\n"
+        "/start — Приветствие и вводная\n"
+        "/learn — Обучить Лизу новому знанию (только админ)\n"
+        "/ref [запрос] — Найти в базе знаний\n"
+        "/list_knowledge [n] — Показать последние записи (до 1000)\n"
+        "/clear — Очистить историю общения (только админ)\n"
+        "/help — Показать это меню\n"
+    )
+    await update.message.reply_text(help_text, parse_mode="Markdown")
+
+
+async def learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    user_input = update.message.text.strip()
-    await process_user_input(user_id, user_input, context, update.message.reply_text)
-
-
-async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("Извините, только администратор может обучать Лизу.")
+        return
+    text = update.message.text.removeprefix("/learn").strip()
+    if not text:
+        await update.message.reply_text("Пожалуйста, укажи, чему ты хочешь меня научить. Пример:\n/learn как мы убираем рестораны после открытия")
+        return
+    lines = text.split("\n", 1)
+    title = lines[0][:100]
+    content = lines[1] if len(lines) > 1 else lines[0]
     try:
-        voice = update.message.voice
-        file = await context.bot.get_file(voice.file_id)
-        file_path = "voice.ogg"
-        mp3_path = "voice.mp3"
-        await file.download_to_drive(file_path)
-        AudioSegment.from_file(file_path).export(mp3_path, format="mp3")
-
-        with open(mp3_path, "rb") as audio_file:
-            transcript = openai.audio.transcriptions.create(model="whisper-1", file=audio_file)
-
-        text = transcript.text.strip()
-        logger.info(f"Transcribed: {text}")
-
-        user_id = update.effective_user.id
-        await process_user_input(user_id, text, context, update.message.reply_text)
-
+        save_knowledge(title, content, user_id)
+        await update.message.reply_text(f"Спасибо, Александр! Я запомнила информацию под названием: \"{title}\"")
     except Exception as e:
-        logger.exception("Error in voice processing")
-        await update.message.reply_text("Произошла ошибка при обработке голосового сообщения.")
+        await update.message.reply_text(f"⚠️ {e}")
 
 
-async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def reference(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Укажи ключевое слово для поиска. Пример: /ref офис")
+        return
+    keyword = ' '.join(context.args)
+    result = find_knowledge_by_keyword(keyword)
+    if result:
+        await update.message.reply_text(f"🔎 Нашла в базе знаний:\n\n*{result[0]}*\n\n{result[1][:3000]}", parse_mode="Markdown")
+    else:
+        await update.message.reply_text("К сожалению, ничего не нашла по твоему запросу. Попробуй другое слово или обучи меня через /learn")
+
+
+async def list_knowledge(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        await update.message.reply_text("Команда доступна только администраторам.")
+        return
+
     try:
-        document = update.message.document
-        file_path = f"./{document.file_name}"
-        file = await context.bot.get_file(document.file_id)
-        await file.download_to_drive(file_path)
-        content = ""
+        limit = min(int(context.args[0]), 1000) if context.args else 20
+    except ValueError:
+        await update.message.reply_text("Укажи число — сколько записей показать. Пример: /list_knowledge 50")
+        return
 
-        if file_path.endswith(".txt"):
-            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read()
-        elif file_path.endswith(".pdf"):
-            with fitz.open(file_path) as pdf:
-                for page in pdf:
-                    content += page.get_text()
-        elif file_path.endswith(".docx"):
-            doc = docx.Document(file_path)
-            content = "\n".join([para.text for para in doc.paragraphs])
-        else:
-            await update.message.reply_text("Пожалуйста, отправьте .txt, .pdf или .docx файл.")
-            return
+    conn = sqlite3.connect("liza_db.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title, timestamp FROM knowledge ORDER BY timestamp DESC LIMIT ?", (limit,))
+    rows = cursor.fetchall()
+    conn.close()
 
-        if update.effective_user.id:
-            save_conversation(update.effective_user.id, content)
+    if not rows:
+        await update.message.reply_text("База знаний пока пуста.")
+        return
 
-        logger.info(f"Received document from {update.effective_user.id}: {document.file_name}")
-        await update.message.reply_text("Файл принят и обработан. Я запомнила информацию!")
+    message = f"🧐 Последние {len(rows)} знаний в базе:\n\n"
+    for i, (id_, title, timestamp) in enumerate(rows, 1):
+        short_title = title[:60] + "..." if len(title) > 60 else title
+        message += f"{i}. [ID: {id_}] {short_title} ({timestamp[:19]})\n"
+    await update.message.reply_text(message)
 
+
+async def clear_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("Извините, только администратор может очистить контекст.")
+        return
+    try:
+        conn = sqlite3.connect("liza_db.db")
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM conversations WHERE user_id = ?", (user_id,))
+        conn.commit()
+        conn.close()
+        await update.message.reply_text("Контекст общения был очищен.")
     except Exception as e:
-        logger.exception("Error in document processing")
-        await update.message.reply_text("Не удалось обработать документ. Поддерживаются .txt, .pdf и .docx файлы.")
+        await update.message.reply_text(f"Ошибка при очистке контекста: {e}")
 
 
-async def sync_every_hour():
-    from google_connect import sync_drive_folder_to_knowledge
-    folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
-    while True:
-        try:
-            if folder_id:
-                logging.info("⏳ Автоматическая синхронизация папки Google Диска")
-                sync_drive_folder_to_knowledge(folder_id)
-        except Exception as e:
-            logging.error(f"Ошибка при авто-синхронизации: {e}")
-        await asyncio.sleep(3600)
+async def google_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        await update.message.reply_text("Извините, только администратор может загружать документы.")
+        return
+    if not context.args:
+        await update.message.reply_text("Укажи ID Google Документа. Пример: /doc 1A2B3C4D5E6F...")
+        return
+    try:
+        doc_id = context.args[0]
+        content = get_google_docs_text(doc_id)
+        save_conversation(update.effective_user.id, content)
+        await update.message.reply_text("📄 Документ прочитан и добавлен в базу знаний.")
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка при загрузке документа: {e}")
+
+
+async def google_sheet(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        await update.message.reply_text("Извините, только администратор может загружать таблицы.")
+        return
+    if len(context.args) < 2:
+        await update.message.reply_text("Формат: /sheet <SPREADSHEET_ID> <RANGE>. Пример: /sheet 1A2B3C Range1!A1:E10")
+        return
+    try:
+        sheet_id = context.args[0]
+        sheet_range = " ".join(context.args[1:])
+        rows = get_google_sheet_values(sheet_id, sheet_range)
+        content = "\n".join([", ".join(row) for row in rows])
+        save_conversation(update.effective_user.id, content)
+        await update.message.reply_text("📊 Таблица обработана и сохранена!")
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка при загрузке таблицы: {e}")
+
+
+async def sync_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("⛔ Только администратор может запускать синхронизацию.")
+        return
+    if not context.args:
+        await update.message.reply_text("Укажи ID папки Google Диска. Пример: /sync 1AbcDEF456...")
+        return
+    folder_id = context.args[0]
+    try:
+        sync_drive_folder_to_knowledge(folder_id)
+        await update.message.reply_text("📁 Папка синхронизирована! Все файлы добавлены в базу знаний.")
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка при синхронизации: {e}")
+
+
+async def debug_knowledge(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        await update.message.reply_text("⛔ Только администратор может использовать отладку.")
+        return
+
+    conn = sqlite3.connect("liza_db.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT title, content, timestamp FROM knowledge ORDER BY timestamp DESC LIMIT 5")
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        await update.message.reply_text("📬 База знаний пуста.")
+        return
+
+    msg = "🧠 *Последние знания в базе:*\n\n"
+    for i, (title, content, ts) in enumerate(rows, 1):
+        short = content.strip().replace('\n', ' ')[:120]
+        msg += f"{i}. *{title}* ({ts[:19]})\n_{short}_\n\n"
+
+    await update.message.reply_text(msg, parse_mode="Markdown")
