@@ -9,8 +9,9 @@ import fitz  # PyMuPDF
 import docx  # python-docx
 import sqlite3
 import json
+import asyncio
 from datetime import datetime
-from google_connect import get_google_docs_text, get_google_sheet_values
+from google_connect import get_google_docs_text, get_google_sheet_values, sync_drive_folder_to_knowledge
 
 
 # Настройка логгера
@@ -108,6 +109,30 @@ async def google_sheet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Ошибка при загрузке таблицы: {e}")
 
+async def sync_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in admin_ids:
+        await update.message.reply_text("⛔ Только администратор может запускать синхронизацию.")
+        return
+    if not context.args:
+        await update.message.reply_text("Укажи ID папки Google Диска. Пример: /sync 1AbcDEF456...")
+        return
+    folder_id = context.args[0]
+    try:
+        sync_drive_folder_to_knowledge(folder_id)
+        await update.message.reply_text("📁 Папка синхронизирована! Все файлы добавлены в базу знаний.")
+    except Exception as e:
+        logger.exception("Ошибка при синхронизации папки")
+        await update.message.reply_text(f"Ошибка при синхронизации: {e}")
+
+async def sync_every_hour():
+    while True:
+        try:
+            logger.info("⏳ Автоматическая синхронизация папки Google Диска")
+            sync_drive_folder_to_knowledge(GOOGLE_DRIVE_FOLDER_ID)
+        except Exception as e:
+            logger.error(f"Ошибка при авто-синхронизации: {e}")
+        await asyncio.sleep(3600)  # 1 час
 
 async def learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -254,7 +279,9 @@ app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
 app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
 app.add_handler(CommandHandler("doc", google_doc))
 app.add_handler(CommandHandler("sheet", google_sheet))
+app.add_handler(CommandHandler("sync", sync_folder))
 
 create_db()
 
+asyncio.create_task(sync_every_hour())
 app.run_polling()
