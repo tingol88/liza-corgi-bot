@@ -115,3 +115,27 @@ async def sync_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📁 Папка синхронизирована! Все файлы добавлены в базу знаний.")
     except Exception as e:
         await update.message.reply_text(f"Ошибка при синхронизации: {e}")
+
+async def debug_knowledge(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        await update.message.reply_text("⛔ Только администратор может использовать отладку.")
+        return
+
+    import sqlite3
+    conn = sqlite3.connect("liza_db.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT title, content, timestamp FROM knowledge ORDER BY timestamp DESC LIMIT 5")
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        await update.message.reply_text("📭 База знаний пуста.")
+        return
+
+    msg = "🧠 *Последние знания в базе:*\n\n"
+    for i, (title, content, ts) in enumerate(rows, 1):
+        short = content.strip().replace('\n', ' ')[:120]
+        msg += f"{i}. *{title}* ({ts[:19]})\n_{short}_\n\n"
+
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
