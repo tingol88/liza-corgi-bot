@@ -47,3 +47,12 @@ def get_relevant_knowledge(query, limit=3):
     results = cursor.fetchall()
     conn.close()
     return [f"{title}\n{content}" for title, content in results]
+
+
+def find_knowledge_by_keyword(keyword):
+    conn = sqlite3.connect("liza_db.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT title, content FROM knowledge WHERE content LIKE ? ORDER BY timestamp DESC LIMIT 1", (f"%{keyword}%",))
+    result = cursor.fetchone()
+    conn.close()
+    return result
