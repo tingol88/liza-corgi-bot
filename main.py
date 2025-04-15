@@ -1,7 +1,14 @@
 import os
-import logging
 import asyncio
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
+import logging
+import nest_asyncio
+
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    filters,
+)
 from db_utils import create_db
 from handlers import (
     start,
@@ -11,7 +18,9 @@ from handlers import (
     clear_conversation,
     google_doc,
     google_sheet,
-    sync_folder,
+    sync_folder
+)
+from services import (
     handle_text,
     handle_voice,
     handle_document,
@@ -20,23 +29,17 @@ from handlers import (
 
 # Настройка логгера
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO,
-    handlers=[
-        logging.FileHandler("liza_corgi.log"),
-        logging.StreamHandler()
-    ]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# Токены и переменные окружения
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 GOOGLE_DRIVE_FOLDER_ID = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
 
-# Запуск бота
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-# Регистрация команд
+# Регистрация хендлеров
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("help", help_command))
 app.add_handler(CommandHandler("learn", learn))
@@ -46,15 +49,12 @@ app.add_handler(CommandHandler("doc", google_doc))
 app.add_handler(CommandHandler("sheet", google_sheet))
 app.add_handler(CommandHandler("sync", sync_folder))
 
-# Регистрация сообщений
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
 
-# Создание базы данных
 create_db()
 
-# Основной цикл
 async def main():
     if GOOGLE_DRIVE_FOLDER_ID:
         app.create_task(sync_every_hour())
@@ -63,6 +63,5 @@ async def main():
     await app.run_polling()
 
 if __name__ == "__main__":
-    import nest_asyncio
     nest_asyncio.apply()
-    asyncio.get_event_loop().run_until_complete(main())
+    asyncio.run(main())
