@@ -1,7 +1,12 @@
 import os
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient import errors
+from googleapiclient import errors, http
+import mimetypes
+from io import BytesIO
+import fitz  # PyMuPDF
+import docx
+from db import save_knowledge
 
 GOOGLE_CREDENTIALS_PATH = os.environ["GOOGLE_CREDENTIALS_PATH"]
 
@@ -23,19 +28,14 @@ def get_google_sheet_values(spreadsheet_id, range_name):
     result = sheet.values().get(spreadsheetId=spreadsheet_id, range=range_name).execute()
     return result.get("values", [])
 
-import mimetypes
-from io import BytesIO
-import fitz
-import docx
-
 def sync_drive_folder_to_knowledge(folder_id):
     creds = service_account.Credentials.from_service_account_file(GOOGLE_CREDENTIALS_PATH)
     drive_service = build('drive', 'v3', credentials=creds)
-    
+
     results = drive_service.files().list(
         q=f"'{folder_id}' in parents and trashed = false",
         fields="files(id, name, mimeType)").execute()
-    
+
     files = results.get('files', [])
     known_types = {
         'application/pdf': 'pdf',
@@ -49,14 +49,14 @@ def sync_drive_folder_to_knowledge(folder_id):
         mime = file['mimeType']
         ext = known_types.get(mime)
         if not ext:
-            continue  # unsupported type
-        
+            continue
+
         content = ""
         request = drive_service.files().get_media(fileId=file_id)
         fh = BytesIO()
-        downloader = googleapiclient.http.MediaIoBaseDownload(fh, request)
+        downloader = http.MediaIoBaseDownload(fh, request)
         done = False
-        while done is False:
+        while not done:
             _, done = downloader.next_chunk()
 
         fh.seek(0)
@@ -69,7 +69,5 @@ def sync_drive_folder_to_knowledge(folder_id):
             f = BytesIO(fh.read())
             d = docx.Document(f)
             content = "\n".join([p.text for p in d.paragraphs])
-        
-        from main import save_knowledge
-        save_knowledge(name, content.strip(), added_by=126204360)  # ID администратора
 
+        save_knowledge(name, content.strip(), added_by=126204360)
