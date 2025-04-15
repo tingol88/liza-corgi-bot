@@ -6,6 +6,7 @@ import fitz  # PyMuPDF
 import docx  # python-docx
 import json
 import asyncio
+import nest_asyncio
 from telegram import Update, Document
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from pydub import AudioSegment
@@ -253,5 +254,7 @@ async def main():
     await app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import nest_asyncio
+    nest_asyncio.apply()
+    asyncio.get_event_loop().run_until_complete(main())
 
