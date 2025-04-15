@@ -1,6 +1,7 @@
 import os
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from googleapiclient import errors
 
 GOOGLE_CREDENTIALS_PATH = os.environ["GOOGLE_CREDENTIALS_PATH"]
 
