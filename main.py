@@ -31,6 +31,7 @@ admin_ids = [126204360, ADMIN_CHAT_ID]
 
 openai.api_key = os.environ["OPENAI_API_KEY"]
 BOT_TOKEN = os.environ["BOT_TOKEN"]
+GOOGLE_DRIVE_FOLDER_ID = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
 
 SYSTEM_PROMPT = {
     "role": "system",
