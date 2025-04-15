@@ -43,11 +43,15 @@ def save_knowledge(title, content, added_by):
 def get_relevant_knowledge(query, limit=3):
     conn = sqlite3.connect("liza_db.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT title, content FROM knowledge WHERE content LIKE ? ORDER BY timestamp DESC LIMIT ?", (f"%{query}%", limit))
+    q = f"%{query.lower()}%"
+    cursor.execute("""
+        SELECT title, content FROM knowledge
+        WHERE LOWER(content) LIKE ? OR LOWER(title) LIKE ?
+        ORDER BY timestamp DESC LIMIT ?
+    """, (q, q, limit))
     results = cursor.fetchall()
     conn.close()
     return [f"{title}\n{content}" for title, content in results]
-
 
 def find_knowledge_by_keyword(keyword):
     conn = sqlite3.connect("liza_db.db")
