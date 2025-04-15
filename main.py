@@ -15,7 +15,8 @@ from db_utils import (
     save_conversation,
     get_conversation,
     save_knowledge,
-    get_relevant_knowledge
+    get_relevant_knowledge,
+    find_knowledge_by_keyword
 )
 
 # Настройка логгера
@@ -119,11 +120,7 @@ async def reference(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Укажи ключевое слово для поиска. Пример: /ref офис")
         return
     keyword = ' '.join(context.args)
-    conn = sqlite3.connect("liza_db.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT title, content FROM knowledge WHERE content LIKE ? ORDER BY timestamp DESC LIMIT 1", (f"%{keyword}%",))
-    result = cursor.fetchone()
-    conn.close()
+    result = find_knowledge_by_keyword(keyword)
     if result:
         await update.message.reply_text(f"🔎 Нашла в базе знаний:\n\n*{result[0]}*\n\n{result[1][:3000]}", parse_mode="Markdown")
     else:
