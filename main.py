@@ -283,5 +283,7 @@ app.add_handler(CommandHandler("sync", sync_folder))
 
 create_db()
 
-asyncio.create_task(sync_every_hour())
-app.run_polling()
+async def on_startup(app):
+    app.create_task(sync_every_hour())
+
+app.run_polling(post_init=on_startup)
