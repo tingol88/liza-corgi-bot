@@ -19,14 +19,14 @@ from handlers import (
     google_doc,
     google_sheet,
     sync_folder,
-    debug_knowledge
+    debug_knowledge,
+    list_knowledge
 )
 from services import (
     handle_text,
     handle_voice,
     handle_document,
-    sync_every_hour,
-    list_knowledge
+    sync_every_hour
 )
 
 # Настройка логгера
