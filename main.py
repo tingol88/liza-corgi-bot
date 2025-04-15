@@ -285,11 +285,12 @@ app.add_handler(CommandHandler("sync", sync_folder))
 create_db()
 
 async def main():
-    await app.initialize()
-    app.create_task(sync_every_hour())
-    await app.start()
-    await app.updater.start_polling()
-    await app.updater.idle()
+    if GOOGLE_DRIVE_FOLDER_ID:
+        app.create_task(sync_every_hour())
+    else:
+        logger.warning("GOOGLE_DRIVE_FOLDER_ID не задан — авто-синхронизация не будет запущена")
+    await app.run_polling()
 
 if __name__ == "__main__":
     asyncio.run(main())
+
