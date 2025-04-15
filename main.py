@@ -25,7 +25,8 @@ from services import (
     handle_text,
     handle_voice,
     handle_document,
-    sync_every_hour
+    sync_every_hour,
+    list_knowledge
 )
 
 # Настройка логгера
@@ -50,6 +51,7 @@ app.add_handler(CommandHandler("doc", google_doc))
 app.add_handler(CommandHandler("sheet", google_sheet))
 app.add_handler(CommandHandler("sync", sync_folder))
 app.add_handler(CommandHandler("debug_knowledge", debug_knowledge))
+app.add_handler(CommandHandler("list_knowledge", list_knowledge))
 
 app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
