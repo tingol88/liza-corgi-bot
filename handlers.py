@@ -49,6 +49,32 @@ async def reference(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("К сожалению, ничего не нашла по твоему запросу. Попробуй другое слово или обучи меня через /learn")
 
+async def list_knowledge(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        await update.message.reply_text("Команда доступна только администраторам.")
+        return
+
+    try:
+        limit = min(int(context.args[0]), 1000) if context.args else 20
+    except ValueError:
+        await update.message.reply_text("Укажи число — сколько записей показать. Пример: /list_knowledge 50")
+        return
+
+    conn = sqlite3.connect("liza_db.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title, timestamp FROM knowledge ORDER BY timestamp DESC LIMIT ?", (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        await update.message.reply_text("База знаний пока пуста.")
+        return
+
+    message = f"🧠 Последние {len(rows)} знаний в базе:\n\n"
+    for i, (id_, title, timestamp) in enumerate(rows, 1):
+        short_title = title[:60] + "..." if len(title) > 60 else title
+        message += f"{i}. [ID: {id_}] {short_title} ({timestamp[:19]})\n"
+    await update.message.reply_text(message)
 
 async def clear_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
