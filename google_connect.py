@@ -21,3 +21,54 @@ def get_google_sheet_values(spreadsheet_id, range_name):
     sheet = service.spreadsheets()
     result = sheet.values().get(spreadsheetId=spreadsheet_id, range=range_name).execute()
     return result.get("values", [])
+
+import mimetypes
+from io import BytesIO
+import fitz
+import docx
+
+def sync_drive_folder_to_knowledge(folder_id):
+    creds = service_account.Credentials.from_service_account_file(GOOGLE_CREDENTIALS_PATH)
+    drive_service = build('drive', 'v3', credentials=creds)
+    
+    results = drive_service.files().list(
+        q=f"'{folder_id}' in parents and trashed = false",
+        fields="files(id, name, mimeType)").execute()
+    
+    files = results.get('files', [])
+    known_types = {
+        'application/pdf': 'pdf',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+        'text/plain': 'txt'
+    }
+
+    for file in files:
+        file_id = file['id']
+        name = file['name']
+        mime = file['mimeType']
+        ext = known_types.get(mime)
+        if not ext:
+            continue  # unsupported type
+        
+        content = ""
+        request = drive_service.files().get_media(fileId=file_id)
+        fh = BytesIO()
+        downloader = googleapiclient.http.MediaIoBaseDownload(fh, request)
+        done = False
+        while done is False:
+            _, done = downloader.next_chunk()
+
+        fh.seek(0)
+        if ext == 'txt':
+            content = fh.read().decode('utf-8', errors='ignore')
+        elif ext == 'pdf':
+            doc = fitz.open("pdf", fh.read())
+            content = "\n".join(page.get_text() for page in doc)
+        elif ext == 'docx':
+            f = BytesIO(fh.read())
+            d = docx.Document(f)
+            content = "\n".join([p.text for p in d.paragraphs])
+        
+        from main import save_knowledge
+        save_knowledge(name, content.strip(), added_by=126204360)  # ID администратора
+
