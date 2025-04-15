@@ -18,7 +18,8 @@ from handlers import (
     clear_conversation,
     google_doc,
     google_sheet,
-    sync_folder
+    sync_folder,
+    debug_knowledge
 )
 from services import (
     handle_text,
@@ -48,6 +49,7 @@ app.add_handler(CommandHandler("clear", clear_conversation))
 app.add_handler(CommandHandler("doc", google_doc))
 app.add_handler(CommandHandler("sheet", google_sheet))
 app.add_handler(CommandHandler("sync", sync_folder))
+app.add_handler(CommandHandler("debug_knowledge", debug_knowledge))
 
 app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
