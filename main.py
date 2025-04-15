@@ -1,17 +1,24 @@
 import os
 import openai
 import logging
-from telegram import Update, Document
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
-from pydub import AudioSegment
 import requests
 import fitz  # PyMuPDF
 import docx  # python-docx
 import sqlite3
 import json
 import asyncio
+from telegram import Update, Document
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from pydub import AudioSegment
 from datetime import datetime
 from google_connect import get_google_docs_text, get_google_sheet_values, sync_drive_folder_to_knowledge
+from db_utils import (
+    create_db,
+    save_conversation,
+    get_conversation,
+    save_knowledge,
+    get_relevant_knowledge
+)
 
 
 # Настройка логгера
@@ -37,46 +44,6 @@ SYSTEM_PROMPT = {
     "role": "system",
     "content": "Ты — Лиза, виртуальный помощник клининговой компании Cleaning-Moscow. Ты гордишся нашей компанией. Ты хорошо разбираешься в клининге, но можешь помочь и с другими вопросами — по жизни, бизнесу, технологиям и многому другому. Ты умная, доброжелательная и любознательная."
 }
-
-def create_db():
-    conn = sqlite3.connect("liza_db.db")
-    cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS conversations (user_id INTEGER PRIMARY KEY, context TEXT)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS documents (user_id INTEGER, document_name TEXT, document_content TEXT, PRIMARY KEY (user_id, document_name))''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS knowledge (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT, content TEXT, added_by INTEGER, timestamp TEXT)''')
-    conn.commit()
-    conn.close()
-
-def save_conversation(user_id, message):
-    conn = sqlite3.connect("liza_db.db")
-    cursor = conn.cursor()
-    cursor.execute("REPLACE INTO conversations (user_id, context) VALUES (?, ?)", (user_id, message))
-    conn.commit()
-    conn.close()
-
-def get_conversation(user_id):
-    conn = sqlite3.connect("liza_db.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT context FROM conversations WHERE user_id = ?", (user_id,))
-    result = cursor.fetchone()
-    conn.close()
-    return result[0] if result else ""
-
-def save_knowledge(title, content, added_by):
-    conn = sqlite3.connect("liza_db.db")
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO knowledge (title, content, added_by, timestamp) VALUES (?, ?, ?, ?)",
-                   (title, content, added_by, datetime.now().isoformat()))
-    conn.commit()
-    conn.close()
-
-def get_relevant_knowledge(query, limit=3):
-    conn = sqlite3.connect("liza_db.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT title, content FROM knowledge WHERE content LIKE ? ORDER BY timestamp DESC LIMIT ?", (f"%{query}%", limit))
-    results = cursor.fetchall()
-    conn.close()
-    return [f"{title}\n{content}" for title, content in results]
 
 async def google_doc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in admin_ids:
