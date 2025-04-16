@@ -170,3 +170,32 @@ async def debug_knowledge(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg += f"{i}. *{title}* ({ts[:19]})\n_{short}_\n\n"
 
     await update.message.reply_text(msg, parse_mode="Markdown")
+
+async def delete_knowledge(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS:
+        await update.message.reply_text("⛔ Только администратор может удалять знания.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("Укажи один или несколько ID записей для удаления. Пример: /delete_knowledge 123 124")
+        return
+
+    try:
+        ids = [int(arg) for arg in context.args]
+    except ValueError:
+        await update.message.reply_text("Все ID должны быть числами. Пример: /delete_knowledge 123 124")
+        return
+
+    conn = sqlite3.connect("liza_db.db")
+    cursor = conn.cursor()
+    placeholders = ','.join('?' for _ in ids)
+    cursor.execute(f"DELETE FROM knowledge WHERE id IN ({placeholders})", ids)
+    conn.commit()
+    deleted = cursor.rowcount
+    conn.close()
+
+    if deleted:
+        await update.message.reply_text(f"✅ Удалено записей: {deleted}")
+    else:
+        await update.message.reply_text("⚠️ Ни одна запись не была удалена. Проверь ID.")
+
