@@ -4,7 +4,7 @@ from db_utils import save_conversation, save_knowledge, find_knowledge_by_keywor
 from google_connect import get_google_docs_text, get_google_sheet_values, sync_drive_folder_to_knowledge
 import sqlite3
 
-ADMIN_IDS = [126204360]
+ADMIN_IDS = [126204360, 982915733]
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
