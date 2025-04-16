@@ -13,7 +13,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
-        "🛠️ *Команды Лизы*:\n\n"
+        "🛠️ Команды Лизы:\n\n"
         "/start — Приветствие и вводная\n"
         "/learn — Обучить Лизу новому знанию (только админ)\n"
         "/ref [запрос] — Найти в базе знаний\n"
@@ -21,7 +21,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/clear — Очистить историю общения (только админ)\n"
         "/help — Показать это меню\n"
     )
-    await update.message.reply_text(help_text, parse_mode="Markdown")
+    await update.message.reply_text(help_text)  # Без parse_mode
+
 
 
 async def learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
