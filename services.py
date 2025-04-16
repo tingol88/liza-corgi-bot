@@ -5,7 +5,6 @@ import os
 import fitz  # PyMuPDF
 import docx
 from pydub import AudioSegment
-import asyncio
 
 from db_utils import save_conversation, get_conversation, get_relevant_knowledge
 
@@ -14,7 +13,7 @@ openai.api_key = os.environ["OPENAI_API_KEY"]
 
 SYSTEM_PROMPT = {
     "role": "system",
-    "content": "Ты — Лиза, виртуальный помощник клининговой компании Cleaning-Moscow. Ты гордишся нашей компанией. Ты хорошо разбираешься в клининге, но можешь помочь и с другими вопросами — по жизни, бизнесу, технологиям и многому другому. Ты умная, доброжелательная и любознательная."
+    "content": "Ты — Лиза, виртуальный помощник клининговой компании Cleaning-Moscow. Ты гордишься нашей компанией. Отвечай дружелюбно, чётко и только на основе обучающих материалов, если они есть."
 }
 
 
@@ -26,16 +25,24 @@ async def process_user_input(user_id, user_input, context, send_reply):
 
     knowledge_matches = get_relevant_knowledge(user_input)
     knowledge_text = "\n\n".join(knowledge_matches)
+    has_knowledge = bool(knowledge_matches)
 
     try:
-        if knowledge_matches:
-            note = "🧠 Это знание из базы:\n\n"
+        if has_knowledge:
+            note = "🧠 Я нашла информацию в базе знаний:\n\n"
+            user_prompt = (
+                f"Вот обучающие материалы из базы знаний:\n"
+                f"{knowledge_text}\n\n"
+                f"Теперь ответь на вопрос, используя ТОЛЬКО эти материалы:\n"
+                f"{user_input}"
+            )
         else:
             note = ""
+            user_prompt = f"Вопрос: {user_input}"
 
         messages = [
             SYSTEM_PROMPT,
-            {"role": "user", "content": f"{knowledge_text}\n\nВопрос: {user_input}"}
+            {"role": "user", "content": user_prompt}
         ]
 
         completion = openai.chat.completions.create(
@@ -47,7 +54,7 @@ async def process_user_input(user_id, user_input, context, send_reply):
 
     except Exception as e:
         logger.exception("Ошибка в process_user_input")
-        await send_reply("⚠️ Ошибка при обработке запроса.")
+        await send_reply("⚠️ Произошла ошибка при обработке запроса.")
 
 
 async def handle_text(update, context):
