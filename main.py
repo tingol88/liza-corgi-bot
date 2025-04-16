@@ -20,7 +20,8 @@ from handlers import (
     google_sheet,
     sync_folder,
     debug_knowledge,
-    list_knowledge
+    list_knowledge,
+    delete_knowledge
 )
 from services import (
     handle_text,
@@ -52,6 +53,7 @@ app.add_handler(CommandHandler("sheet", google_sheet))
 app.add_handler(CommandHandler("sync", sync_folder))
 app.add_handler(CommandHandler("debug_knowledge", debug_knowledge))
 app.add_handler(CommandHandler("list_knowledge", list_knowledge))
+app.add_handler(CommandHandler("delete_knowledge", delete_knowledge))
 
 app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
