@@ -50,7 +50,11 @@ async def process_user_input(user_id, user_input, context, send_reply):
             messages=messages
         )
         answer = completion.choices[0].message.content
-        await send_reply(note + answer)
+
+        try:
+            await send_reply(note + answer, parse_mode="Markdown")
+        except Exception:
+            await send_reply(note + answer)
 
     except Exception as e:
         logger.exception("Ошибка в process_user_input")
