@@ -5,6 +5,7 @@ import os
 import fitz  # PyMuPDF
 import docx
 from pydub import AudioSegment
+import asyncio
 
 from db_utils import save_conversation, get_conversation, get_relevant_knowledge
 
@@ -22,16 +23,31 @@ async def process_user_input(user_id, user_input, context, send_reply):
     context_history = get_conversation(user_id)
     context_history += f"\n{user_input}"
     save_conversation(user_id, context_history)
+
     knowledge_matches = get_relevant_knowledge(user_input)
     knowledge_text = "\n\n".join(knowledge_matches)
+
     try:
-        messages = [SYSTEM_PROMPT, {"role": "user", "content": f"{knowledge_text}\n\nВопрос: {user_input}"}]
-        completion = openai.chat.completions.create(model="gpt-4o", messages=messages)
+        if knowledge_matches:
+            note = "🧠 Это знание из базы:\n\n"
+        else:
+            note = ""
+
+        messages = [
+            SYSTEM_PROMPT,
+            {"role": "user", "content": f"{knowledge_text}\n\nВопрос: {user_input}"}
+        ]
+
+        completion = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=messages
+        )
         answer = completion.choices[0].message.content
-        await send_reply(answer)
+        await send_reply(note + answer)
+
     except Exception as e:
-        logger.exception("Error in user input processing")
-        await send_reply("Произошла ошибка при обработке запроса.")
+        logger.exception("Ошибка в process_user_input")
+        await send_reply("⚠️ Ошибка при обработке запроса.")
 
 
 async def handle_text(update, context):
