@@ -20,6 +20,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/list_knowledge [n] — Показать последние записи (до 1000)\n"
         "/clear — Очистить историю общения (только админ)\n"
         "/help — Показать это меню\n"
+        "/sync - <ID_папки_на_Google_Диске>"
     )
     await update.message.reply_text(help_text)  # Без parse_mode
 
