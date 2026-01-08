@@ -99,4 +99,49 @@ def get_relevant_knowledge(query, limit=3):
         ORDER BY timestamp DESC LIMIT ?
     """, (q, q, limit))
     results = cursor.fetchall()
-    conn.clo
+    conn.close()
+    return [f"{title}\n{content}" for title, content in results]
+
+
+def find_knowledge_by_keyword(keyword):
+    conn = sqlite3.connect("liza_db.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT title, content FROM knowledge "
+        "WHERE content LIKE ? ORDER BY timestamp DESC LIMIT 1",
+        (f"%{keyword}%",)
+    )
+    result = cursor.fetchone()
+    conn.close()
+    return result
+
+
+# Обновление дневной активности пользователя (с username)
+def update_daily_user_activity(
+    chat_id: int,
+    user_id: int,
+    username: str,
+    msg_datetime: datetime,
+):
+    """
+    Сохраняет для пользователя в чате первое и последнее сообщение за день:
+    - при первом сообщении дня пишется и first_msg, и last_msg;
+    - при последующих обновляется только last_msg.
+    username хранится в последней актуальной версии.
+    """
+    day = msg_datetime.date().isoformat()   # 'YYYY-MM-DD'
+    iso_dt = msg_datetime.isoformat()
+
+    conn = sqlite3.connect("liza_db.db")
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        INSERT INTO daily_user_activity (chat_id, user_id, username, day, first_msg, last_msg)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(chat_id, user_id, day) DO UPDATE SET
+            username = excluded.username,
+            last_msg = excluded.last_msg
+    """, (chat_id, user_id, username, day, iso_dt, iso_dt))
+
+    conn.commit()
+    conn.close()
