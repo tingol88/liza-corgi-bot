@@ -22,13 +22,14 @@ from handlers import (
     debug_knowledge,
     list_knowledge,
     delete_knowledge,
+    export_stats,          # NEW
 )
 from services import (
     handle_text,
     handle_voice,
     handle_document,
     sync_every_hour,
-    log_daily_activity,   # NEW
+    log_daily_activity,    # NEW
 )
 
 # Настройка логгера
@@ -55,6 +56,7 @@ app.add_handler(CommandHandler("sync", sync_folder))
 app.add_handler(CommandHandler("debug_knowledge", debug_knowledge))
 app.add_handler(CommandHandler("list_knowledge", list_knowledge))
 app.add_handler(CommandHandler("delete_knowledge", delete_knowledge))
+app.add_handler(CommandHandler("export_stats", export_stats))   # NEW
 
 # Хендлеры контента
 app.add_handler(MessageHandler(filters.VOICE, handle_voice))
