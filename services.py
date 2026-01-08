@@ -5,15 +5,25 @@ import os
 import fitz  # PyMuPDF
 import docx
 from pydub import AudioSegment
+import asyncio
 
-from db_utils import save_conversation, get_conversation, get_relevant_knowledge
+from db_utils import (
+    save_conversation,
+    get_conversation,
+    get_relevant_knowledge,
+    update_daily_user_activity,   # NEW
+)
 
 logger = logging.getLogger(__name__)
 openai.api_key = os.environ["OPENAI_API_KEY"]
 
 SYSTEM_PROMPT = {
     "role": "system",
-    "content": "Ты — Лиза, виртуальный помощник клининговой компании Cleaning-Moscow. Ты гордишься нашей компанией. Отвечай дружелюбно, чётко и только на основе обучающих материалов, если они есть."
+    "content": (
+        "Ты — Лиза, виртуальный помощник клининговой компании Cleaning-Moscow. "
+        "Ты гордишься нашей компанией. Отвечай дружелюбно, чётко и только на основе "
+        "обучающих материалов, если они есть."
+    ),
 }
 
 
@@ -42,12 +52,12 @@ async def process_user_input(user_id, user_input, context, send_reply):
 
         messages = [
             SYSTEM_PROMPT,
-            {"role": "user", "content": user_prompt}
+            {"role": "user", "content": user_prompt},
         ]
 
         completion = openai.chat.completions.create(
             model="gpt-4o",
-            messages=messages
+            messages=messages,
         )
         answer = completion.choices[0].message.content
 
@@ -56,7 +66,7 @@ async def process_user_input(user_id, user_input, context, send_reply):
         except Exception:
             await send_reply(note + answer)
 
-    except Exception as e:
+    except Exception:
         logger.exception("Ошибка в process_user_input")
         await send_reply("⚠️ Произошла ошибка при обработке запроса.")
 
@@ -76,16 +86,21 @@ async def handle_voice(update, context):
         await file.download_to_drive(file_path)
         AudioSegment.from_file(file_path).export(mp3_path, format="mp3")
         with open(mp3_path, "rb") as audio_file:
-            transcript = openai.audio.transcriptions.create(model="whisper-1", file=audio_file)
+            transcript = openai.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+            )
         text = transcript.text.strip()
         logger.info(f"Transcribed: {text}")
 
         user_id = update.effective_user.id
         await process_user_input(user_id, text, context, update.message.reply_text)
 
-    except Exception as e:
+    except Exception:
         logger.exception("Error in voice processing")
-        await update.message.reply_text("Произошла ошибка при обработке голосового сообщения.")
+        await update.message.reply_text(
+            "Произошла ошибка при обработке голосового сообщения."
+        )
 
 
 async def handle_document(update, context):
@@ -106,19 +121,28 @@ async def handle_document(update, context):
             doc = docx.Document(file_path)
             content = "\n".join([para.text for para in doc.paragraphs])
         else:
-            await update.message.reply_text("Пожалуйста, отправьте .txt, .pdf или .docx файл.")
+            await update.message.reply_text(
+                "Пожалуйста, отправьте .txt, .pdf или .docx файл."
+            )
             return
 
         save_conversation(update.effective_user.id, content)
-        logger.info(f"Received document from {update.effective_user.id}: {document.file_name}")
-        await update.message.reply_text("Файл принят и обработан. Я запомнила информацию!")
-    except Exception as e:
+        logger.info(
+            f"Received document from {update.effective_user.id}: {document.file_name}"
+        )
+        await update.message.reply_text(
+            "Файл принят и обработан. Я запомнила информацию!"
+        )
+    except Exception:
         logger.exception("Error in document processing")
-        await update.message.reply_text("Не удалось обработать документ. Поддерживаются .txt, .pdf и .docx файлы.")
+        await update.message.reply_text(
+            "Не удалось обработать документ. Поддерживаются .txt, .pdf и .docx файлы."
+        )
 
 
 async def sync_every_hour():
     from google_connect import sync_drive_folder_to_knowledge
+
     folder_id = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
     while True:
         try:
@@ -128,3 +152,23 @@ async def sync_every_hour():
         except Exception as e:
             logger.error(f"Ошибка при авто-синхронизации: {e}")
         await asyncio.sleep(3600)
+
+
+# ---------- НОВОЕ: логирование первой и последней активности за день ----------
+
+async def log_daily_activity(update, context):
+    """
+    Логирует для каждого сообщения пользователя в чате:
+    - если это первое сообщение в этот день — запишется и first_msg, и last_msg;
+    - если не первое — обновится только last_msg.
+    """
+    msg = update.effective_message
+    if msg is None or msg.from_user is None:
+        return
+
+    await asyncio.to_thread(
+        update_daily_user_activity,
+        msg.chat.id,
+        msg.from_user.id,
+        msg.date,  # datetime Telegram
+    )
