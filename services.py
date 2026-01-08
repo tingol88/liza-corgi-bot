@@ -11,7 +11,6 @@ from db_utils import (
     save_conversation,
     get_conversation,
     get_relevant_knowledge,
-    update_daily_user_activity,
 )
 
 logger = logging.getLogger(__name__)
@@ -158,25 +157,41 @@ async def sync_every_hour():
 
 async def log_daily_activity(update, context):
     """
-    Логирует для каждого сообщения пользователя в чате:
-    - если это первое сообщение в этот день — запишется и first_msg, и last_msg;
-    - если не первое — обновится только last_msg.
+    ВРЕМЕННЫЙ ВАРИАНТ:
+    Пишем первую/последнюю активность за день напрямую в БД, минуя db_utils,
+    чтобы убедиться, что хендлер работает и БД заполняется.
     """
     msg = update.effective_message
     if msg is None or msg.from_user is None:
         return
 
+    from datetime import datetime
+
     username = msg.from_user.username or msg.from_user.full_name or ""
+    now = msg.date or datetime.utcnow()
+    day = now.date().isoformat()
+    iso_dt = now.isoformat()
 
     logger.info(
-        f"[ACTIVITY] chat={msg.chat.id} user={msg.from_user.id} ({username}) date={msg.date}"
+        f"[ACTIVITY] direct-write chat={msg.chat.id} user={msg.from_user.id} ({username}) day={day} dt={iso_dt}"
     )
 
-    await asyncio.to_thread(
-        update_daily_user_activity,
+    conn = sqlite3.connect("liza_db.db")
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        INSERT INTO daily_user_activity (chat_id, user_id, username, day, first_msg, last_msg)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(chat_id, user_id, day) DO UPDATE SET
+            username = excluded.username,
+            last_msg = excluded.last_msg
+    """, (
         msg.chat.id,
         msg.from_user.id,
         username,
-        msg.date,  # datetime Telegram
-    )
-    
+        day,
+        iso_dt,
+        iso_dt,
+    ))
+    conn.commit()
+    conn.close()
