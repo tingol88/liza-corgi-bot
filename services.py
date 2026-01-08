@@ -11,7 +11,7 @@ from db_utils import (
     save_conversation,
     get_conversation,
     get_relevant_knowledge,
-    update_daily_user_activity,   # NEW
+    update_daily_user_activity,
 )
 
 logger = logging.getLogger(__name__)
@@ -154,7 +154,7 @@ async def sync_every_hour():
         await asyncio.sleep(3600)
 
 
-# ---------- НОВОЕ: логирование первой и последней активности за день ----------
+# ---------- Логирование первой и последней активности за день ----------
 
 async def log_daily_activity(update, context):
     """
@@ -166,9 +166,17 @@ async def log_daily_activity(update, context):
     if msg is None or msg.from_user is None:
         return
 
+    username = msg.from_user.username or msg.from_user.full_name or ""
+
+    logger.info(
+        f"[ACTIVITY] chat={msg.chat.id} user={msg.from_user.id} ({username}) date={msg.date}"
+    )
+
     await asyncio.to_thread(
         update_daily_user_activity,
         msg.chat.id,
         msg.from_user.id,
+        username,
         msg.date,  # datetime Telegram
     )
+    
