@@ -21,19 +21,20 @@ from handlers import (
     sync_folder,
     debug_knowledge,
     list_knowledge,
-    delete_knowledge
+    delete_knowledge,
 )
 from services import (
     handle_text,
     handle_voice,
     handle_document,
-    sync_every_hour
+    sync_every_hour,
+    log_daily_activity,   # NEW
 )
 
 # Настройка логгера
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
+    level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ GOOGLE_DRIVE_FOLDER_ID = os.environ.get("GOOGLE_DRIVE_FOLDER_ID")
 
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-# Регистрация хендлеров
+# Регистрация хендлеров команд
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("help", help_command))
 app.add_handler(CommandHandler("learn", learn))
@@ -55,11 +56,16 @@ app.add_handler(CommandHandler("debug_knowledge", debug_knowledge))
 app.add_handler(CommandHandler("list_knowledge", list_knowledge))
 app.add_handler(CommandHandler("delete_knowledge", delete_knowledge))
 
+# Хендлеры контента
 app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
 app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
 
+# Хендлер логирования активности – ДОЛЖЕН идти последним
+app.add_handler(MessageHandler(filters.ALL, log_daily_activity))
+
 create_db()
+
 
 async def main():
     if GOOGLE_DRIVE_FOLDER_ID:
@@ -67,6 +73,7 @@ async def main():
     else:
         logger.warning("GOOGLE_DRIVE_FOLDER_ID не задан — авто-синхронизация не будет запущена")
     await app.run_polling()
+
 
 if __name__ == "__main__":
     nest_asyncio.apply()
