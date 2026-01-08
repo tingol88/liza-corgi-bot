@@ -32,14 +32,15 @@ def create_db():
         )
     """)
 
-    # Новая таблица: первая и последняя активность за день
+    # Таблица: первая и последняя активность за день + username
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS daily_user_activity (
-            chat_id   INTEGER,
-            user_id   INTEGER,
-            day       TEXT,   -- 'YYYY-MM-DD'
-            first_msg TEXT,   -- ISO datetime
-            last_msg  TEXT,   -- ISO datetime
+            chat_id    INTEGER,
+            user_id    INTEGER,
+            username   TEXT,
+            day        TEXT,   -- 'YYYY-MM-DD'
+            first_msg  TEXT,   -- ISO datetime
+            last_msg   TEXT,   -- ISO datetime
             PRIMARY KEY (chat_id, user_id, day)
         )
     """)
@@ -98,42 +99,4 @@ def get_relevant_knowledge(query, limit=3):
         ORDER BY timestamp DESC LIMIT ?
     """, (q, q, limit))
     results = cursor.fetchall()
-    conn.close()
-    return [f"{title}\n{content}" for title, content in results]
-
-
-def find_knowledge_by_keyword(keyword):
-    conn = sqlite3.connect("liza_db.db")
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT title, content FROM knowledge "
-        "WHERE content LIKE ? ORDER BY timestamp DESC LIMIT 1",
-        (f"%{keyword}%",)
-    )
-    result = cursor.fetchone()
-    conn.close()
-    return result
-
-
-# Новая функция: обновление дневной активности пользователя
-def update_daily_user_activity(chat_id: int, user_id: int, msg_datetime: datetime):
-    """
-    Сохраняет для пользователя в чате первое и последнее сообщение за день:
-    - при первом сообщении дня пишется и first_msg, и last_msg;
-    - при последующих обновляется только last_msg.
-    """
-    day = msg_datetime.date().isoformat()   # 'YYYY-MM-DD'
-    iso_dt = msg_datetime.isoformat()
-
-    conn = sqlite3.connect("liza_db.db")
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        INSERT INTO daily_user_activity (chat_id, user_id, day, first_msg, last_msg)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(chat_id, user_id, day) DO UPDATE SET
-            last_msg = excluded.last_msg
-    """, (chat_id, user_id, day, iso_dt, iso_dt))
-
-    conn.commit()
-    conn.close()
+    conn.clo
